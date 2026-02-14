@@ -3,10 +3,11 @@ namespace NetRunnerSlice.Net;
 
 public static class NetChannels
 {
-    public const int Input = 0;
-    public const int Snapshot = 1;
-    public const int Control = 2;
-    public const int Count = 3;
+    // Reserve channel 0 for SceneMultiplayer internals; custom transport uses 1..3.
+    public const int Input = 1;
+    public const int Snapshot = 2;
+    public const int Control = 3;
+    public const int Count = 4;
 }
 
 public static class NetConstants

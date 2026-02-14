@@ -44,6 +44,9 @@ public partial class NetSession : Node
     private RunMode _mode;
     private NetworkConfig _config = new();
     private Node3D? _playerRoot;
+    private bool _hasSpawnOrigin;
+    private Transform3D _spawnOrigin = Transform3D.Identity;
+    private float _spawnYaw;
 
     private NetworkSimulator? _simulator;
     private NetClock? _netClock;
@@ -104,6 +107,20 @@ public partial class NetSession : Node
         _simSeed = seed;
 
         _simulator?.Configure(_simEnabled, _simLatency, _simJitter, _simLoss);
+    }
+
+    public void SetSpawnOrigin(Transform3D spawnOrigin)
+    {
+        _spawnOrigin = spawnOrigin;
+        _hasSpawnOrigin = true;
+        _spawnYaw = _spawnOrigin.Basis.GetEuler().Y;
+    }
+
+    public void ClearSpawnOrigin()
+    {
+        _hasSpawnOrigin = false;
+        _spawnOrigin = Transform3D.Identity;
+        _spawnYaw = 0.0f;
     }
 
     public override void _Ready()

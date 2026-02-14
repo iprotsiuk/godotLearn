@@ -16,8 +16,10 @@ public partial class NetSession
 
         while (peer.GetAvailablePacketCount() > 0)
         {
-            byte[] packet = peer.GetPacket();
+            // Godot docs: GetPacketPeer() returns the sender for the next queued packet,
+            // so read peer id before GetPacket() to keep sender association correct.
             int fromPeer = peer.GetPacketPeer();
+            byte[] packet = peer.GetPacket();
 
             if (packet.Length == 0)
             {
@@ -122,6 +124,7 @@ public partial class NetSession
         character.Setup(peerId, localCamera, TintForPeer(peerId, localCamera));
         character.Visible = visible;
         character.GlobalPosition = SpawnPointForPeer(peerId);
+        character.SetLook(SpawnYawForPeer(), 0.0f);
         _playerRoot.AddChild(character);
         return character;
     }
@@ -148,10 +151,16 @@ public partial class NetSession
         };
     }
 
-    private static Vector3 SpawnPointForPeer(int peerId)
+    private Vector3 SpawnPointForPeer(int peerId)
     {
         int slot = Mathf.Abs(peerId) % 8;
-        return new Vector3((slot % 4) * 2.5f - 4.0f, 2.0f, (slot / 4) * 2.5f);
+        Vector3 offset = new((slot % 4) * 2.5f - 4.0f, 2.0f, (slot / 4) * 2.5f);
+        return _hasSpawnOrigin ? _spawnOrigin.Origin + (_spawnOrigin.Basis * offset) : offset;
+    }
+
+    private float SpawnYawForPeer()
+    {
+        return _hasSpawnOrigin ? _spawnYaw : 0.0f;
     }
 
     private static Color TintForPeer(int peerId, bool local)
