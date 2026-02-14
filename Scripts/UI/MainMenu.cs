@@ -3,124 +3,86 @@ using Godot;
 
 namespace NetRunnerSlice.UI;
 
-public partial class MainMenu : CanvasLayer
+public partial class MainMenu : Control
 {
-    [Signal]
-    public delegate void HostRequestedEventHandler(int port);
+	[Signal]
+	public delegate void HostRequestedEventHandler(int port);
 
-    [Signal]
-    public delegate void JoinRequestedEventHandler(string ip, int port);
+	[Signal]
+	public delegate void JoinRequestedEventHandler(string ip, int port);
 
-    [Signal]
-    public delegate void QuitRequestedEventHandler();
+	[Signal]
+	public delegate void QuitRequestedEventHandler();
 
-    private LineEdit? _ipEdit;
-    private LineEdit? _portEdit;
+	private LineEdit? _ipEdit;
+	private LineEdit? _portEdit;
+	private Label? _statusLabel;
 
-    public override void _Ready()
-    {
-        Layer = 10;
+	public override void _Ready()
+	{
+		_ipEdit = GetNode<LineEdit>("Root/Panel/VBox/IpEdit");
+		_portEdit = GetNode<LineEdit>("Root/Panel/VBox/PortEdit");
+		_statusLabel = GetNode<Label>("Root/Panel/VBox/StatusLabel");
 
-        Control root = new()
-        {
-            Name = "Root",
-            MouseFilter = Control.MouseFilterEnum.Stop,
-            AnchorRight = 1.0f,
-            AnchorBottom = 1.0f
-        };
-        AddChild(root);
+		GetNode<Button>("Root/Panel/VBox/HostButton").Pressed += OnHostPressed;
+		GetNode<Button>("Root/Panel/VBox/JoinButton").Pressed += OnJoinPressed;
+		GetNode<Button>("Root/Panel/VBox/QuitButton").Pressed += OnQuitPressed;
+	}
 
-        Panel panel = new()
-        {
-            Size = new Vector2(420.0f, 280.0f),
-            Position = new Vector2(40.0f, 40.0f)
-        };
-        root.AddChild(panel);
+	public void SetDefaults(string ip, int port)
+	{
+		if (_ipEdit is not null)
+		{
+			_ipEdit.Text = ip;
+		}
 
-        VBoxContainer vbox = new()
-        {
-            Position = new Vector2(16.0f, 16.0f),
-            Size = new Vector2(388.0f, 248.0f)
-        };
-        panel.AddChild(vbox);
+		if (_portEdit is not null)
+		{
+			_portEdit.Text = port.ToString();
+		}
+	}
 
-        Label title = new()
-        {
-            Text = "NetRunner Slice",
-            HorizontalAlignment = HorizontalAlignment.Center
-        };
-        vbox.AddChild(title);
+	public void SetStatus(string status)
+	{
+		if (_statusLabel is not null)
+		{
+			_statusLabel.Text = status;
+		}
+	}
 
-        Label ipLabel = new() { Text = "Server IP" };
-        vbox.AddChild(ipLabel);
+	private void OnHostPressed()
+	{
+		int port = ParsePort();
+		GD.Print($"MainMenu: Host pressed (port={port})");
+		EmitSignal(SignalName.HostRequested, port);
+	}
 
-        _ipEdit = new LineEdit { Text = "127.0.0.1" };
-        vbox.AddChild(_ipEdit);
+	private void OnJoinPressed()
+	{
+		int port = ParsePort();
+		string ip = _ipEdit?.Text.Trim() ?? "127.0.0.1";
+		if (string.IsNullOrEmpty(ip))
+		{
+			ip = "127.0.0.1";
+		}
 
-        Label portLabel = new() { Text = "Port" };
-        vbox.AddChild(portLabel);
+		GD.Print($"MainMenu: Join pressed (ip={ip}, port={port})");
+		EmitSignal(SignalName.JoinRequested, ip, port);
+	}
 
-        _portEdit = new LineEdit { Text = "7777" };
-        vbox.AddChild(_portEdit);
+	private void OnQuitPressed()
+	{
+		GD.Print("MainMenu: Quit pressed");
+		EmitSignal(SignalName.QuitRequested);
+	}
 
-        Button hostButton = new() { Text = "Host" };
-        hostButton.Pressed += OnHostPressed;
-        vbox.AddChild(hostButton);
+	private int ParsePort()
+	{
+		if (_portEdit is not null && int.TryParse(_portEdit.Text.Trim(), out int parsed))
+		{
+			return Mathf.Clamp(parsed, 1, 65535);
+		}
 
-        Button joinButton = new() { Text = "Join" };
-        joinButton.Pressed += OnJoinPressed;
-        vbox.AddChild(joinButton);
-
-        Button quitButton = new() { Text = "Quit" };
-        quitButton.Pressed += () => EmitSignal(SignalName.QuitRequested);
-        vbox.AddChild(quitButton);
-
-        Label hint = new()
-        {
-            Text = "Mouse: look | WASD: move | Space: jump | Esc: release mouse",
-            AutowrapMode = TextServer.AutowrapMode.WordSmart
-        };
-        vbox.AddChild(hint);
-    }
-
-    public void SetDefaults(string ip, int port)
-    {
-        if (_ipEdit is not null)
-        {
-            _ipEdit.Text = ip;
-        }
-
-        if (_portEdit is not null)
-        {
-            _portEdit.Text = port.ToString();
-        }
-    }
-
-    private void OnHostPressed()
-    {
-        int port = ParsePort();
-        EmitSignal(SignalName.HostRequested, port);
-    }
-
-    private void OnJoinPressed()
-    {
-        int port = ParsePort();
-        string ip = _ipEdit?.Text.Trim() ?? "127.0.0.1";
-        if (string.IsNullOrEmpty(ip))
-        {
-            ip = "127.0.0.1";
-        }
-
-        EmitSignal(SignalName.JoinRequested, ip, port);
-    }
-
-    private int ParsePort()
-    {
-        if (_portEdit is not null && int.TryParse(_portEdit.Text.Trim(), out int parsed))
-        {
-            return Mathf.Clamp(parsed, 1, 65535);
-        }
-
-        return 7777;
-    }
+		return 7777;
+	}
 }

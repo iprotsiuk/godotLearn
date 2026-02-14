@@ -9,6 +9,9 @@ namespace NetRunnerSlice.Bootstrap;
 
 public partial class Main : Node
 {
+    private const string MainMenuScenePath = "res://Scenes/UI/MainMenu.tscn";
+    private const string TestWorldScenePath = "res://Scenes/testWorld.tscn";
+
     private readonly IGameMode _gameMode = new FreeRunMode();
 
     private CliArgs? _cli;
@@ -17,7 +20,14 @@ public partial class Main : Node
     private MainMenu? _menu;
     private DebugOverlay? _overlay;
 
+    private Node? _sceneRoot;
+    private Node3D? _activeWorld;
     private Node3D? _playersRoot;
+
+    private bool _joinPending;
+    private string _pendingJoinIp = "127.0.0.1";
+    private int _pendingJoinPort = 7777;
+
     private int _simSeed = 1337;
 
     public override void _Ready()
@@ -28,9 +38,10 @@ public partial class Main : Node
 
         _config = NetworkConfigLoader.Load("res://Config/network_config.json");
 
-        BuildWorld();
         BuildUi();
-        BuildSession();
+        EnsureSceneRoot();
+        EnsureSession();
+        HookMultiplayerSignals();
 
         _gameMode.Enter();
 
@@ -43,7 +54,7 @@ public partial class Main : Node
                 StartJoin(_cli.Ip, _cli.Port);
                 break;
             default:
-                _menu?.Show();
+                ShowMenu("Ready");
                 break;
         }
     }
@@ -60,12 +71,28 @@ public partial class Main : Node
 
     public override void _ExitTree()
     {
+        UnhookMultiplayerSignals();
+        _session?.StopSession();
         _gameMode.Exit();
     }
 
-    private void BuildSession()
+    private void HookMultiplayerSignals()
     {
-        if (_config is null || _playersRoot is null)
+        Multiplayer.ConnectedToServer += OnConnectedToServer;
+        Multiplayer.ConnectionFailed += OnConnectionFailed;
+        Multiplayer.ServerDisconnected += OnServerDisconnected;
+    }
+
+    private void UnhookMultiplayerSignals()
+    {
+        Multiplayer.ConnectedToServer -= OnConnectedToServer;
+        Multiplayer.ConnectionFailed -= OnConnectionFailed;
+        Multiplayer.ServerDisconnected -= OnServerDisconnected;
+    }
+
+    private void EnsureSession()
+    {
+        if (_session is not null)
         {
             return;
         }
@@ -75,7 +102,15 @@ public partial class Main : Node
             Name = "NetSession"
         };
         AddChild(_session);
-        _session.Initialize(_config, _playersRoot);
+        ApplySimFromCliAndConfig();
+    }
+
+    private void ApplySimFromCliAndConfig()
+    {
+        if (_session is null || _config is null)
+        {
+            return;
+        }
 
         bool simEnabled = _cli is not null && _cli.SimulationEnabled;
         int simLatency = _cli?.SimLatencyMs ?? _config.SimulatedLatencyMs;
@@ -88,10 +123,9 @@ public partial class Main : Node
 
     private void BuildUi()
     {
-        _menu = new MainMenu
-        {
-            Name = "MainMenu"
-        };
+        PackedScene menuScene = GD.Load<PackedScene>(MainMenuScenePath);
+        _menu = menuScene.Instantiate<MainMenu>();
+        _menu.Name = "MainMenu";
         AddChild(_menu);
 
         _overlay = new DebugOverlay
@@ -109,134 +143,176 @@ public partial class Main : Node
         {
             _menu.SetDefaults(_cli.Ip, _cli.Port);
         }
+
+        _menu.SetStatus("Ready");
     }
 
-    private void BuildWorld()
+    private void EnsureSceneRoot()
     {
-        Node3D world = new()
+        _sceneRoot = GetNodeOrNull<Node>("SceneRoot");
+        if (_sceneRoot is not null)
         {
-            Name = "World"
-        };
-        AddChild(world);
+            return;
+        }
 
-        DirectionalLight3D light = new()
+        _sceneRoot = new Node
         {
-            Rotation = new Vector3(-0.8f, -0.5f, 0.0f),
-            LightEnergy = 2.2f,
-            ShadowEnabled = true
+            Name = "SceneRoot"
         };
-        world.AddChild(light);
+        AddChild(_sceneRoot);
+    }
 
-        WorldEnvironment env = new();
-        Godot.Environment environment = new()
+    private bool LoadTestWorld()
+    {
+        if (_sceneRoot is null)
         {
-            BackgroundMode = Godot.Environment.BGMode.Sky,
-            TonemapMode = Godot.Environment.ToneMapper.Aces,
-            SsrEnabled = false,
-            SsaoEnabled = true
-        };
-        env.Environment = environment;
-        world.AddChild(env);
+            GD.PushError("SceneRoot is missing.");
+            return false;
+        }
 
-        CreateFloor(world);
-        CreateBlock(world, new Vector3(6.0f, 0.5f, 0.0f), new Vector3(2.0f, 1.0f, 2.0f));
-        CreateBlock(world, new Vector3(10.0f, 1.0f, -2.5f), new Vector3(2.0f, 2.0f, 2.0f));
-        CreateBlock(world, new Vector3(14.0f, 1.5f, 0.5f), new Vector3(2.0f, 3.0f, 2.0f));
+        if (_activeWorld is not null)
+        {
+            return true;
+        }
+
+        PackedScene worldScene = GD.Load<PackedScene>(TestWorldScenePath);
+        Node worldNode = worldScene.Instantiate();
+        if (worldNode is not Node3D world3D)
+        {
+            GD.PushError($"World scene root is not Node3D: {TestWorldScenePath}");
+            worldNode.QueueFree();
+            return false;
+        }
+
+        _activeWorld = world3D;
+        _sceneRoot.AddChild(_activeWorld);
 
         _playersRoot = new Node3D
         {
             Name = "Players"
         };
-        world.AddChild(_playersRoot);
+        _activeWorld.AddChild(_playersRoot);
+        return true;
     }
 
-    private static void CreateFloor(Node3D parent)
+    private void UnloadWorld()
     {
-        StaticBody3D floorBody = new()
-        {
-            Name = "Floor"
-        };
+        _playersRoot = null;
 
-        CollisionShape3D shape = new();
-        BoxShape3D box = new()
+        if (_activeWorld is null)
         {
-            Size = new Vector3(120.0f, 1.0f, 120.0f)
-        };
-        shape.Shape = box;
-        shape.Position = new Vector3(0.0f, -0.5f, 0.0f);
-        floorBody.AddChild(shape);
+            return;
+        }
 
-        MeshInstance3D mesh = new()
-        {
-            Mesh = new BoxMesh
-            {
-                Size = box.Size
-            },
-            Position = shape.Position
-        };
-
-        StandardMaterial3D material = new()
-        {
-            AlbedoColor = new Color(0.23f, 0.25f, 0.27f),
-            Roughness = 0.8f
-        };
-        mesh.MaterialOverride = material;
-
-        floorBody.AddChild(mesh);
-        parent.AddChild(floorBody);
+        _activeWorld.QueueFree();
+        _activeWorld = null;
     }
 
-    private static void CreateBlock(Node3D parent, Vector3 pos, Vector3 size)
+    private bool InitializeSessionForWorld()
     {
-        StaticBody3D body = new();
-        CollisionShape3D shape = new()
+        if (_session is null || _config is null || _playersRoot is null)
         {
-            Shape = new BoxShape3D { Size = size },
-            Position = pos
-        };
+            return false;
+        }
 
-        MeshInstance3D mesh = new()
-        {
-            Mesh = new BoxMesh { Size = size },
-            Position = pos
-        };
-
-        StandardMaterial3D material = new()
-        {
-            AlbedoColor = new Color(0.62f, 0.58f, 0.52f),
-            Roughness = 0.9f
-        };
-        mesh.MaterialOverride = material;
-
-        body.AddChild(shape);
-        body.AddChild(mesh);
-        parent.AddChild(body);
+        _session.Initialize(_config, _playersRoot);
+        ApplySimFromCliAndConfig();
+        return true;
     }
 
     private void StartHost(int port)
     {
-        if (_session is null)
+        _joinPending = false;
+        _session?.StopSession();
+        UnloadWorld();
+        ShowMenu("Hosting...");
+
+        if (!LoadTestWorld() || !InitializeSessionForWorld() || _session is null)
         {
+            ShowMenu("Failed to load test world.");
             return;
         }
 
         if (_session.StartListenServer(port))
         {
             _menu?.Hide();
+            Input.MouseMode = Input.MouseModeEnum.Captured;
+            return;
         }
+
+        UnloadWorld();
+        ShowMenu("Host start failed.");
     }
 
     private void StartJoin(string ip, int port)
     {
+        _pendingJoinIp = ip;
+        _pendingJoinPort = port;
+        _joinPending = true;
+
+        _session?.StopSession();
+        UnloadWorld();
+        ShowMenu("Connecting...");
+
         if (_session is null)
+        {
+            ShowMenu("Network session unavailable.");
+            _joinPending = false;
+            return;
+        }
+
+        if (!_session.StartClient(ip, port))
+        {
+            ShowMenu("Client start failed.");
+            _joinPending = false;
+        }
+    }
+
+    private void ShowMenu(string status)
+    {
+        _menu?.Show();
+        _menu?.SetStatus(status);
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+    }
+
+    private void OnConnectedToServer()
+    {
+        if (!_joinPending)
         {
             return;
         }
 
-        if (_session.StartClient(ip, port))
+        if (!LoadTestWorld() || !InitializeSessionForWorld())
         {
-            _menu?.Hide();
+            _session?.StopSession();
+            _joinPending = false;
+            ShowMenu("Connected, but world setup failed.");
+            UnloadWorld();
+            return;
         }
+
+        _joinPending = false;
+        _menu?.SetStatus($"Connected to {_pendingJoinIp}:{_pendingJoinPort}");
+        _menu?.Hide();
+        Input.MouseMode = Input.MouseModeEnum.Captured;
+    }
+
+    private void OnConnectionFailed()
+    {
+        if (!_joinPending)
+        {
+            return;
+        }
+
+        _joinPending = false;
+        UnloadWorld();
+        ShowMenu("Connection failed.");
+    }
+
+    private void OnServerDisconnected()
+    {
+        UnloadWorld();
+        ShowMenu("Disconnected from server.");
     }
 
     private void OnQuit()

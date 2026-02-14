@@ -26,7 +26,8 @@ public partial class DebugOverlay : CanvasLayer
         MarginContainer root = new()
         {
             AnchorRight = 1.0f,
-            AnchorBottom = 1.0f
+            AnchorBottom = 1.0f,
+            MouseFilter = Control.MouseFilterEnum.Ignore
         };
         root.AddThemeConstantOverride("margin_left", 8);
         root.AddThemeConstantOverride("margin_top", 8);
@@ -34,7 +35,8 @@ public partial class DebugOverlay : CanvasLayer
 
         _panel = new Panel
         {
-            CustomMinimumSize = new Vector2(470.0f, 280.0f)
+            CustomMinimumSize = new Vector2(470.0f, 280.0f),
+            MouseFilter = Control.MouseFilterEnum.Stop
         };
         root.AddChild(_panel);
 
@@ -133,6 +135,9 @@ public partial class DebugOverlay : CanvasLayer
         {
             return;
         }
+
+        GD.Print(
+            $"DebugOverlay: Apply pressed (enabled={_simEnabled.ButtonPressed}, latency={(int)_latencyMs.Value}, jitter={(int)_jitterMs.Value}, loss={(float)_lossPercent.Value:0.0})");
 
         EmitSignal(
             SignalName.NetSimChanged,
