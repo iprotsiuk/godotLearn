@@ -51,6 +51,10 @@ public struct SessionMetrics
     public float LastCorrectionMagnitude;
     public float RttMs;
     public float JitterMs;
+    public bool LocalGrounded;
+    public float MoveSpeed;
+    public float GroundAcceleration;
+    public int ServerInputDelayTicks;
     public bool NetworkSimulationEnabled;
     public int SimLatencyMs;
     public int SimJitterMs;

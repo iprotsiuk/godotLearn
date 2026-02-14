@@ -12,7 +12,7 @@ public static class NetChannels
 
 public static class NetConstants
 {
-    public const uint ProtocolVersion = 2;
+    public const uint ProtocolVersion = 3;
     public const int MaxPlayers = 16;
     public const int MaxInputRedundancy = 3;
 
@@ -21,7 +21,7 @@ public static class NetConstants
 
     public const int InputPacketBytes = 2 + (InputCommandBytes * MaxInputRedundancy);
     public const int SnapshotPacketBytes = 6 + (SnapshotStateBytes * MaxPlayers);
-    public const int ControlPacketBytes = 48;
+    public const int ControlPacketBytes = 96;
 }
 
 public enum PacketType : byte

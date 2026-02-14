@@ -126,6 +126,9 @@ public partial class DebugOverlay : CanvasLayer
             $"\nLast Acked Input: {metrics.LastAckedInput}" +
             $"\nPending Inputs: {metrics.PendingInputCount}" +
             $"\nReconcile Error: {metrics.LastCorrectionMagnitude:0.000} m" +
+            $"\nLocal Grounded: {(metrics.LocalGrounded ? "Yes" : "No")}" +
+            $"\nMoveSpeed/GroundAccel: {metrics.MoveSpeed:0.###} / {metrics.GroundAcceleration:0.###}" +
+            $"\nInput Delay Ticks: {metrics.ServerInputDelayTicks}" +
             $"\nNetSim: {(metrics.NetworkSimulationEnabled ? "ON" : "OFF")} ({metrics.SimLatencyMs}ms/{metrics.SimJitterMs}ms/{metrics.SimLossPercent:0.0}% loss)";
     }
 

@@ -41,6 +41,7 @@ public partial class PlayerCharacter : CharacterBody3D
 		CollisionMask = 1;
 		UpDirection = Vector3.Up;
 		FloorStopOnSlope = true;
+		FloorSnapLength = 0.25f;
 
 		CollisionShape3D collision = new();
 		CapsuleShape3D capsule = new()

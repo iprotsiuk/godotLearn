@@ -6,6 +6,7 @@ public sealed class NetworkConfig
     public int ServerTickRate { get; set; } = 60;
     public int ClientTickRate { get; set; } = 60;
     public int SnapshotRate { get; set; } = 20;
+    public int ServerInputDelayTicks { get; set; } = 2;
     public int InterpolationDelayMs { get; set; } = 100;
     public int MaxExtrapolationMs { get; set; } = 100;
     public float ReconciliationSnapThreshold { get; set; } = 1.5f;
@@ -18,6 +19,8 @@ public sealed class NetworkConfig
     public float AirControlFactor { get; set; } = 0.35f;
     public float JumpVelocity { get; set; } = 8.75f;
     public float Gravity { get; set; } = 24.0f;
+    public float FloorSnapLength { get; set; } = 0.25f;
+    public float GroundStickVelocity { get; set; } = -0.1f;
 
     public float MouseSensitivity { get; set; } = 0.0023f;
     public float PitchClampDegrees { get; set; } = 89.0f;

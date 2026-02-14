@@ -19,6 +19,9 @@ public partial class NetSession : Node
         public required PlayerCharacter Character;
         public ServerInputBuffer Inputs { get; } = new();
         public bool HasStartedInputStream;
+        public bool HasStartSeq;
+        public uint StartSeq;
+        public int WarmupTicksRemaining;
         public uint LastProcessedSeq;
         public InputCommand LastInput;
     }

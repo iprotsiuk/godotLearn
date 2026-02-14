@@ -34,9 +34,9 @@ public static class PlayerMotor
 			{
 				velocity.Y = config.JumpVelocity;
 			}
-			else if (velocity.Y < 0.0f)
+			else
 			{
-				velocity.Y = -0.1f;
+				velocity.Y = Mathf.Min(config.GroundStickVelocity, -0.01f);
 			}
 		}
 		else

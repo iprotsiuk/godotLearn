@@ -38,7 +38,16 @@ public partial class NetSession
                         _config.MaxExtrapolationMs,
                         _config.ReconciliationSmoothMs,
                         _config.ReconciliationSnapThreshold,
-                        _config.PitchClampDegrees);
+                        _config.PitchClampDegrees,
+                        _config.MoveSpeed,
+                        _config.GroundAcceleration,
+                        _config.AirAcceleration,
+                        _config.AirControlFactor,
+                        _config.JumpVelocity,
+                        _config.Gravity,
+                        _config.ServerInputDelayTicks,
+                        _config.FloorSnapLength,
+                        _config.GroundStickVelocity);
                     SendPacket(fromPeer, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
                     GD.Print($"NetSession: Welcome sent to peer {fromPeer}");
                     break;
@@ -76,6 +85,17 @@ public partial class NetSession
                 _config.ReconciliationSmoothMs = Mathf.Max(1, NetCodec.ReadControlReconcileSmoothMs(packet));
                 _config.ReconciliationSnapThreshold = Mathf.Max(0.1f, NetCodec.ReadControlReconcileSnapThreshold(packet));
                 _config.PitchClampDegrees = Mathf.Clamp(NetCodec.ReadControlPitchClampDegrees(packet), 1.0f, 89.0f);
+                _config.MoveSpeed = Mathf.Max(0.1f, NetCodec.ReadControlMoveSpeed(packet));
+                _config.GroundAcceleration = Mathf.Max(0.1f, NetCodec.ReadControlGroundAcceleration(packet));
+                _config.AirAcceleration = Mathf.Max(0.1f, NetCodec.ReadControlAirAcceleration(packet));
+                _config.AirControlFactor = Mathf.Clamp(NetCodec.ReadControlAirControlFactor(packet), 0.0f, 1.0f);
+                _config.JumpVelocity = Mathf.Max(0.1f, NetCodec.ReadControlJumpVelocity(packet));
+                _config.Gravity = Mathf.Max(0.1f, NetCodec.ReadControlGravity(packet));
+                _config.ServerInputDelayTicks = Mathf.Clamp(NetCodec.ReadControlServerInputDelayTicks(packet), 0, 8);
+                _config.FloorSnapLength = Mathf.Clamp(NetCodec.ReadControlFloorSnapLength(packet), 0.0f, 2.0f);
+                _config.GroundStickVelocity = Mathf.Min(NetCodec.ReadControlGroundStickVelocity(packet), -0.01f);
+                GD.Print(
+                    $"Welcome applied: MoveSpeed={_config.MoveSpeed:0.###}, GroundAccel={_config.GroundAcceleration:0.###}, InputDelayTicks={_config.ServerInputDelayTicks}");
                 _netClock = new NetClock(_config.ServerTickRate);
                 _welcomeReceived = true;
                 TrySpawnLocalCharacter();

@@ -20,7 +20,16 @@ public static partial class NetCodec
         int maxExtrapolationMs,
         int reconcileSmoothMs,
         float reconcileSnapThreshold,
-        float pitchClampDegrees)
+        float pitchClampDegrees,
+        float moveSpeed,
+        float groundAcceleration,
+        float airAcceleration,
+        float airControlFactor,
+        float jumpVelocity,
+        float gravity,
+        int serverInputDelayTicks,
+        float floorSnapLength,
+        float groundStickVelocity)
     {
         packet[0] = (byte)PacketType.Control;
         packet[1] = (byte)ControlType.Welcome;
@@ -34,6 +43,15 @@ public static partial class NetCodec
         WriteInt(packet, 30, reconcileSmoothMs);
         WriteFloat(packet, 34, reconcileSnapThreshold);
         WriteFloat(packet, 38, pitchClampDegrees);
+        WriteFloat(packet, 42, moveSpeed);
+        WriteFloat(packet, 46, groundAcceleration);
+        WriteFloat(packet, 50, airAcceleration);
+        WriteFloat(packet, 54, airControlFactor);
+        WriteFloat(packet, 58, jumpVelocity);
+        WriteFloat(packet, 62, gravity);
+        WriteInt(packet, 66, serverInputDelayTicks);
+        WriteFloat(packet, 70, floorSnapLength);
+        WriteFloat(packet, 74, groundStickVelocity);
     }
 
     public static void WriteControlPing(byte[] packet, ushort pingSeq, uint clientTimeMs)
@@ -84,6 +102,24 @@ public static partial class NetCodec
     public static float ReadControlReconcileSnapThreshold(ReadOnlySpan<byte> packet) => ReadFloat(packet, 34);
 
     public static float ReadControlPitchClampDegrees(ReadOnlySpan<byte> packet) => ReadFloat(packet, 38);
+
+    public static float ReadControlMoveSpeed(ReadOnlySpan<byte> packet) => ReadFloat(packet, 42);
+
+    public static float ReadControlGroundAcceleration(ReadOnlySpan<byte> packet) => ReadFloat(packet, 46);
+
+    public static float ReadControlAirAcceleration(ReadOnlySpan<byte> packet) => ReadFloat(packet, 50);
+
+    public static float ReadControlAirControlFactor(ReadOnlySpan<byte> packet) => ReadFloat(packet, 54);
+
+    public static float ReadControlJumpVelocity(ReadOnlySpan<byte> packet) => ReadFloat(packet, 58);
+
+    public static float ReadControlGravity(ReadOnlySpan<byte> packet) => ReadFloat(packet, 62);
+
+    public static int ReadControlServerInputDelayTicks(ReadOnlySpan<byte> packet) => ReadInt(packet, 66);
+
+    public static float ReadControlFloorSnapLength(ReadOnlySpan<byte> packet) => ReadFloat(packet, 70);
+
+    public static float ReadControlGroundStickVelocity(ReadOnlySpan<byte> packet) => ReadFloat(packet, 74);
 
     public static ushort ReadControlPingSeq(ReadOnlySpan<byte> packet) => ReadUShort(packet, 2);
 

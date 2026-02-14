@@ -31,16 +31,38 @@ public partial class NetSession
 
             if (!player.HasStartedInputStream)
             {
-                if (player.Inputs.TryTakeLowestAfter(0, out command, out uint firstSeq) &&
-                    InputSanitizer.TrySanitizeServer(ref command, _config))
+                if (player.HasStartSeq && player.WarmupTicksRemaining > 0)
+                {
+                    player.WarmupTicksRemaining--;
+                    command = player.LastInput;
+                    command.MoveAxes = Vector2.Zero;
+                    command.Buttons &= ~InputButtons.JumpPressed;
+                    command.DtFixed = fixedDt;
+                }
+                else if (player.HasStartSeq)
                 {
                     player.HasStartedInputStream = true;
-                    player.LastProcessedSeq = firstSeq;
-                    player.LastInput = command;
+                    player.LastProcessedSeq = player.StartSeq > 0 ? (player.StartSeq - 1) : 0;
+                    uint expected = player.LastProcessedSeq + 1;
+                    if (player.Inputs.TryTakeExact(expected, out command) &&
+                        InputSanitizer.TrySanitizeServer(ref command, _config))
+                    {
+                        player.LastInput = command;
+                    }
+                    else
+                    {
+                        command = player.LastInput;
+                        command.Seq = expected;
+                        command.Buttons &= ~InputButtons.JumpPressed;
+                        command.DtFixed = fixedDt;
+                    }
+
+                    player.LastProcessedSeq = expected;
                 }
                 else
                 {
                     command = player.LastInput;
+                    command.MoveAxes = Vector2.Zero;
                     command.Buttons &= ~InputButtons.JumpPressed;
                     command.DtFixed = fixedDt;
                 }
@@ -146,6 +168,20 @@ public partial class NetSession
             if (!InputSanitizer.TrySanitizeServer(ref command, _config))
             {
                 continue;
+            }
+
+            if (!serverPlayer.HasStartedInputStream)
+            {
+                if (!serverPlayer.HasStartSeq || command.Seq < serverPlayer.StartSeq)
+                {
+                    serverPlayer.StartSeq = command.Seq;
+                }
+
+                if (!serverPlayer.HasStartSeq)
+                {
+                    serverPlayer.HasStartSeq = true;
+                    serverPlayer.WarmupTicksRemaining = Mathf.Max(0, _config.ServerInputDelayTicks);
+                }
             }
 
             serverPlayer.Inputs.Push(command);

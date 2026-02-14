@@ -28,6 +28,9 @@ NetRunnerSlice is a Godot 4.6 .NET multiplayer FPS movement vertical slice focus
 - Keep yaw/pitch in input and snapshot payloads.
 - Keep time sync + interpolation pipeline active for remote smoothing.
 - We disable SceneTree multiplayer_poll and call `Multiplayer.Poll()` in `_PhysicsProcess` so packet handling and reconciliation happen in a deterministic fixed-step loop.
+- Keep movement constants server-authoritative via Welcome override so all peers simulate identical movement (`MoveSpeed`, accel, jump/gravity, input delay).
+- Tune `ServerInputDelayTicks` conservatively (typically `1..2`) to reduce just-in-time input misses without adding noticeable control latency.
+- Reconciliation target: typical error should stay around `<= 0.05 m` under stable LAN + mild netsim; sustained larger values indicate pipeline drift.
 
 ## Scene Flow
 
