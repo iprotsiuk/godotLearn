@@ -16,6 +16,7 @@ public partial class NetSession
 
         NetCodec.WriteControlHello(_controlPacket);
         SendPacket(1, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+        GD.Print("NetSession: Hello sent");
         _nextPingTimeSec = (Time.GetTicksMsec() / 1000.0) + 0.1;
     }
 

@@ -17,6 +17,9 @@ NetRunnerSlice is a Godot 4.6 .NET multiplayer FPS movement vertical slice focus
 - Keep client prediction + reconciliation in `Scripts/Net/NetSession.Client.cs`.
 - Keep strict sequential input consumption on server (one expected seq per tick after stream start).
 - Keep explicit packet protocol (no movement replication magic / no MultiplayerSynchronizer movement).
+- Keep custom transport on SceneMultiplayer bytes API:
+  - send via `SceneMultiplayer.SendBytes`
+  - receive via `SceneMultiplayer.peer_packet`
 - Keep channel roles:
   - channel 1: input (`Unreliable`)
   - channel 2: snapshots (`UnreliableOrdered`)

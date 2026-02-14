@@ -13,6 +13,9 @@ Always capture before changing code:
   - standalone client
   - listen host local player
   - remote player view
+- Join handshake checkpoint:
+  - `Welcome received` appears in logs.
+  - `LocalCharacter spawned` appears after join.
 
 ## Symptom -> Likely Cause -> Where to Inspect -> What to Log
 

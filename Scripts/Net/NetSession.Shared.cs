@@ -6,39 +6,26 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
-    private void PollIncomingPackets()
+    private void OnPeerPacket(long fromPeerLong, byte[] packet)
     {
-        MultiplayerPeer? peer = Multiplayer.MultiplayerPeer;
-        if (peer is null)
+        if (_mode == RunMode.None || packet.Length == 0)
         {
             return;
         }
 
-        while (peer.GetAvailablePacketCount() > 0)
+        int fromPeer = (int)fromPeerLong;
+        PacketType packetType = (PacketType)packet[0];
+        switch (packetType)
         {
-            // Godot docs: GetPacketPeer() returns the sender for the next queued packet,
-            // so read peer id before GetPacket() to keep sender association correct.
-            int fromPeer = peer.GetPacketPeer();
-            byte[] packet = peer.GetPacket();
-
-            if (packet.Length == 0)
-            {
-                continue;
-            }
-
-            PacketType packetType = (PacketType)packet[0];
-            switch (packetType)
-            {
-                case PacketType.InputBundle:
-                    HandleInputBundle(fromPeer, packet);
-                    break;
-                case PacketType.Snapshot:
-                    HandleSnapshot(packet);
-                    break;
-                case PacketType.Control:
-                    HandleControl(fromPeer, packet);
-                    break;
-            }
+            case PacketType.InputBundle:
+                HandleInputBundle(fromPeer, packet);
+                break;
+            case PacketType.Snapshot:
+                HandleSnapshot(packet);
+                break;
+            case PacketType.Control:
+                HandleControl(fromPeer, packet);
+                break;
         }
     }
 
@@ -55,16 +42,16 @@ public partial class NetSession
 
     private void SendPacketNow(int targetPeer, int channel, MultiplayerPeer.TransferModeEnum mode, byte[] packet)
     {
-        MultiplayerPeer? peer = Multiplayer.MultiplayerPeer;
-        if (peer is null)
+        if (Multiplayer.MultiplayerPeer is null || _sceneMultiplayer is null)
         {
             return;
         }
 
-        peer.TransferChannel = channel;
-        peer.TransferMode = mode;
-        peer.SetTargetPeer(targetPeer);
-        peer.PutPacket(packet);
+        Error err = _sceneMultiplayer.SendBytes(packet, targetPeer, mode, channel);
+        if (err != Error.Ok)
+        {
+            GD.PushError($"SendBytes failed: {err} (target={targetPeer}, channel={channel}, mode={mode})");
+        }
     }
 
     private void OnPeerConnected(long id)
@@ -93,7 +80,6 @@ public partial class NetSession
 
     private void OnConnectedToServer()
     {
-        _localPeerId = Multiplayer.GetUniqueId();
         ClientConnectedToServer();
     }
 

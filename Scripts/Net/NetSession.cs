@@ -44,9 +44,11 @@ public partial class NetSession : Node
     private RunMode _mode;
     private NetworkConfig _config = new();
     private Node3D? _playerRoot;
+    private bool _welcomeReceived;
     private bool _hasSpawnOrigin;
     private Transform3D _spawnOrigin = Transform3D.Identity;
     private float _spawnYaw;
+    private SceneMultiplayer? _sceneMultiplayer;
 
     private NetworkSimulator? _simulator;
     private NetClock? _netClock;
@@ -96,6 +98,7 @@ public partial class NetSession : Node
         _simLoss = _config.SimulatedLossPercent;
         _simSeed = _config.SimulationSeed;
         _netClock = new NetClock(_config.ServerTickRate);
+        TrySpawnLocalCharacter();
     }
 
     public void ApplySimulationOverride(bool enabled, int latency, int jitter, float loss, int seed)
@@ -130,6 +133,15 @@ public partial class NetSession : Node
         Multiplayer.ConnectedToServer += OnConnectedToServer;
         Multiplayer.ConnectionFailed += OnConnectionFailed;
         Multiplayer.ServerDisconnected += OnServerDisconnected;
+        _sceneMultiplayer = Multiplayer as SceneMultiplayer;
+        if (_sceneMultiplayer is not null)
+        {
+            _sceneMultiplayer.Connect("peer_packet", Callable.From<long, byte[]>(OnPeerPacket));
+        }
+        else
+        {
+            GD.PushError("NetSession requires SceneMultiplayer for custom bytes transport.");
+        }
     }
 
     public override void _PhysicsProcess(double delta)
@@ -138,8 +150,6 @@ public partial class NetSession : Node
         {
             return;
         }
-
-        PollIncomingPackets();
 
         if (IsClient)
         {
@@ -223,6 +233,7 @@ public partial class NetSession : Node
     public bool StartClient(string ip, int port)
     {
         StopSession();
+        _playerRoot = null;
 
         ENetMultiplayerPeer peer = new();
         Error err = peer.CreateClient(ip, port, NetChannels.Count);
@@ -237,6 +248,20 @@ public partial class NetSession : Node
         _simulator = new NetworkSimulator(_simSeed, SendPacketNow);
         _simulator.Configure(_simEnabled, _simLatency, _simJitter, _simLoss);
         return true;
+    }
+
+    private void TrySpawnLocalCharacter()
+    {
+        if (_mode != RunMode.Client || !_welcomeReceived || _playerRoot is null || _localCharacter is not null || _localPeerId == 0)
+        {
+            return;
+        }
+
+        _localCharacter = CreateCharacter(_localPeerId, true);
+        _lookYaw = _localCharacter.Yaw;
+        _lookPitch = _localCharacter.Pitch;
+        Input.MouseMode = Input.MouseModeEnum.Captured;
+        GD.Print($"NetSession: LocalCharacter spawned for peer {_localPeerId}");
     }
 
     public void StopSession()
@@ -265,6 +290,7 @@ public partial class NetSession : Node
         _localCharacter?.QueueFree();
         _localCharacter = null;
         _localPeerId = 0;
+        _welcomeReceived = false;
         _simulator = null;
         _pingSent.Clear();
 

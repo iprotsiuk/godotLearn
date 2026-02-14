@@ -17,6 +17,7 @@ public partial class NetSession
             switch (type)
             {
                 case ControlType.Hello:
+                    GD.Print($"NetSession: Hello received from peer {fromPeer}");
                     if (NetCodec.ReadControlProtocol(packet) != NetConstants.ProtocolVersion)
                     {
                         return;
@@ -39,6 +40,7 @@ public partial class NetSession
                         _config.ReconciliationSnapThreshold,
                         _config.PitchClampDegrees);
                     SendPacket(fromPeer, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+                    GD.Print($"NetSession: Welcome sent to peer {fromPeer}");
                     break;
                 case ControlType.Ping:
                     ushort pingSeq = NetCodec.ReadControlPingSeq(packet);
@@ -57,6 +59,7 @@ public partial class NetSession
         switch (type)
         {
             case ControlType.Welcome:
+                GD.Print("NetSession: Welcome received");
                 if (NetCodec.ReadControlProtocol(packet) != NetConstants.ProtocolVersion)
                 {
                     GD.PushError("Protocol mismatch.");
@@ -74,14 +77,8 @@ public partial class NetSession
                 _config.ReconciliationSnapThreshold = Mathf.Max(0.1f, NetCodec.ReadControlReconcileSnapThreshold(packet));
                 _config.PitchClampDegrees = Mathf.Clamp(NetCodec.ReadControlPitchClampDegrees(packet), 1.0f, 89.0f);
                 _netClock = new NetClock(_config.ServerTickRate);
-
-                if (_localCharacter is null)
-                {
-                    _localCharacter = CreateCharacter(_localPeerId, true);
-                    _lookYaw = _localCharacter.Yaw;
-                    _lookPitch = _localCharacter.Pitch;
-                    Input.MouseMode = Input.MouseModeEnum.Captured;
-                }
+                _welcomeReceived = true;
+                TrySpawnLocalCharacter();
                 break;
             case ControlType.Pong:
                 ushort pongSeq = NetCodec.ReadControlPingSeq(packet);

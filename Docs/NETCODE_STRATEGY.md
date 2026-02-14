@@ -33,7 +33,7 @@ Input events (_UnhandledInput / InputMap)
   -> InputSanitizer.SanitizeClient
   -> Predict locally: PlayerMotor.Simulate on local PlayerCharacter
   -> Store in InputHistoryBuffer (pending unacked)
-  -> Encode CH0 bundle via NetCodec.WriteInputBundle (latest + last 2)
+  -> Encode CH1 bundle via NetCodec.WriteInputBundle (latest + last 2)
   -> Send to server (or loopback call on host)
 
 Server sim processes input, then sends snapshot
@@ -50,7 +50,7 @@ Server sim processes input, then sends snapshot
 ### Remote Entity Pipeline
 
 ```text
-Incoming snapshot (CH1)
+Incoming snapshot (CH2)
   -> For each non-local peer: append RemoteSample into RemoteSnapshotBuffer
 
 Each render frame (_Process)
@@ -139,17 +139,22 @@ Packet type `ControlType.Welcome` includes server-authoritative overrides:
 
 Client applies these in `NetSession.Control.cs` and rebuilds `NetClock` from server tick rate.
 
-## Channel Strategy
+## Transport and Channel Strategy
+
+- Custom packets are sent with `SceneMultiplayer.SendBytes(...)`.
+- Custom packets are received via `SceneMultiplayer.peer_packet`.
+- We do not poll `MultiplayerPeer.GetPacket()` / `GetPacketPeer()` for game protocol bytes.
 
 Defined in `NetConstants.cs`.
 
-- CH0 (`NetChannels.Input`): `Unreliable`, high-frequency input bundles.
+- CH1 (`NetChannels.Input`): `Unreliable`, high-frequency input bundles.
   - Reason: late input is usually worse than dropped input.
   - Reliability support: redundancy of latest + previous 2 commands per packet.
-- CH1 (`NetChannels.Snapshot`): `UnreliableOrdered` snapshots.
+- CH2 (`NetChannels.Snapshot`): `UnreliableOrdered` snapshots.
   - Reason: do not block on old snapshots; prefer newest ordered state stream.
-- CH2 (`NetChannels.Control`): `Reliable` handshake/ping/pong.
+- CH3 (`NetChannels.Control`): `Reliable` handshake/ping/pong.
   - Reason: control messages must arrive and remain coherent.
+- CH0: reserved for SceneMultiplayer internals.
 
 ## Host-Local Dual Representation Rules
 
@@ -221,7 +226,8 @@ Implemented by `NetworkSimulator.cs`; configured from `CliArgs.cs`, `Main.cs`, a
 Behavior:
 
 - Applied on send path only (`SendPacket` -> `EnqueueSend`).
-- Random drop by `lossPercent`.
+- Random drop by `lossPercent` only for non-reliable gameplay packets.
+- Reliable/control traffic is delayed/jittered but not dropped.
 - Delay = `latencyMs + uniform[-jitterMs, +jitterMs]`.
 - Packet copied and queued until `Flush` dispatch time.
 

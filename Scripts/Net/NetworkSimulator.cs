@@ -50,7 +50,8 @@ public sealed class NetworkSimulator
             return;
         }
 
-        if ((_rng.NextDouble() * 100.0) < _lossPercent)
+        bool lossAllowed = mode != MultiplayerPeer.TransferModeEnum.Reliable && channel != NetChannels.Control;
+        if (lossAllowed && (_rng.NextDouble() * 100.0) < _lossPercent)
         {
             return;
         }
