@@ -80,7 +80,8 @@ public sealed class RemoteSnapshotBuffer
             if (renderTime <= bTime)
             {
                 float t = (float)((renderTime - aTime) / (bTime - aTime));
-                sampled = Lerp(_samples[i], _samples[i + 1], t);
+                float segmentDuration = (float)(bTime - aTime);
+                sampled = Interpolate(_samples[i], _samples[i + 1], t, segmentDuration);
                 return true;
             }
         }
@@ -97,16 +98,40 @@ public sealed class RemoteSnapshotBuffer
         return true;
     }
 
-    private static RemoteSample Lerp(in RemoteSample a, in RemoteSample b, float t)
+    private static RemoteSample Interpolate(in RemoteSample a, in RemoteSample b, float t, float segmentDuration)
     {
+        Vector3 pos;
+        if (segmentDuration > 0.0001f)
+        {
+            pos = HermitePosition(a.Pos, a.Vel, b.Pos, b.Vel, t, segmentDuration);
+        }
+        else
+        {
+            pos = a.Pos.Lerp(b.Pos, t);
+        }
+
         return new RemoteSample
         {
-            Pos = a.Pos.Lerp(b.Pos, t),
+            Pos = pos,
             Vel = a.Vel.Lerp(b.Vel, t),
             Yaw = Mathf.LerpAngle(a.Yaw, b.Yaw, t),
             Pitch = Mathf.Lerp(a.Pitch, b.Pitch, t),
             Grounded = t < 0.5f ? a.Grounded : b.Grounded
         };
+    }
+
+    private static Vector3 HermitePosition(Vector3 p0, Vector3 v0, Vector3 p1, Vector3 v1, float t, float dt)
+    {
+        // Use endpoint velocities as tangents to preserve smooth diagonal motion between sparse snapshots.
+        float t2 = t * t;
+        float t3 = t2 * t;
+
+        float h00 = (2.0f * t3) - (3.0f * t2) + 1.0f;
+        float h10 = t3 - (2.0f * t2) + t;
+        float h01 = (-2.0f * t3) + (3.0f * t2);
+        float h11 = t3 - t2;
+
+        return (h00 * p0) + (h10 * (v0 * dt)) + (h01 * p1) + (h11 * (v1 * dt));
     }
 
     private void ShiftLeft(int by)
