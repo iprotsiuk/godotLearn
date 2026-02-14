@@ -1,0 +1,25 @@
+# Godot 4 generated cache/import data
+.godot/
+.import/
+*.translation
+
+# Mono/.NET build outputs
+**/bin/
+**/obj/
+.mono/
+
+# IDE/editor
+.vscode/
+.idea/
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+
+# Local runtime outputs
+Builds/
+Logs/

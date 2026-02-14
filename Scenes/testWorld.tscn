@@ -1,0 +1,41 @@
+[gd_scene format=3 uid="uid://dakrqpf0g4xlq"]
+
+[ext_resource type="Texture2D" uid="uid://b323wqc7vyy08" path="res://addons/kenney_prototype_textures/dark/texture_04.png" id="1_l54rq"]
+[ext_resource type="PackedScene" uid="uid://bs72ogkvdd7d6" path="res://addons/proto_controller/proto_controller.tscn" id="2_iey3s"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_d0hh2"]
+albedo_texture = ExtResource("1_l54rq")
+
+[node name="TestWorld" type="Node3D" unique_id=1869141061]
+
+[node name="floor" type="CSGBox3D" parent="." unique_id=1053940192]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.1128068, -0.52537155, 1.1890926)
+material_override = SubResource("StandardMaterial3D_d0hh2")
+use_collision = true
+size = Vector3(100, 0.5, 100)
+
+[node name="ProtoController" parent="." unique_id=679953539 instance=ExtResource("2_iey3s")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, -3)
+
+[node name="CSGCombiner3D" type="CSGCombiner3D" parent="." unique_id=184534502]
+use_collision = true
+
+[node name="CSGBox3D3" type="CSGBox3D" parent="CSGCombiner3D" unique_id=649430120]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 2, 0.94925666, -18.6)
+size = Vector3(0.2, 2.5, 15)
+
+[node name="CSGBox3D" type="CSGBox3D" parent="CSGCombiner3D" unique_id=341964342]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9746283, -11)
+size = Vector3(0.2, 2.5, 15)
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1738664297]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0.94925666, -11)
+size = Vector3(0.2, 2.5, 15)
+
+[node name="CSGBox3D4" type="CSGBox3D" parent="CSGCombiner3D" unique_id=207956478]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0.34962845, -17)
+size = Vector3(2, 1.25, 2)
+
+[node name="CSGBox3D5" type="CSGBox3D" parent="CSGCombiner3D" unique_id=479514390]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0.34962857, -10)
+size = Vector3(2, 1.25, 2)

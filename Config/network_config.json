@@ -1,0 +1,22 @@
+{
+  "serverTickRate": 60,
+  "clientTickRate": 60,
+  "snapshotRate": 20,
+  "interpolationDelayMs": 100,
+  "maxExtrapolationMs": 100,
+  "reconciliationSnapThreshold": 1.5,
+  "reconciliationSmoothMs": 100,
+  "maxPlayers": 16,
+  "moveSpeed": 9.0,
+  "groundAcceleration": 45.0,
+  "airAcceleration": 14.0,
+  "airControlFactor": 0.35,
+  "jumpVelocity": 8.75,
+  "gravity": 24.0,
+  "mouseSensitivity": 0.0023,
+  "pitchClampDegrees": 89.0,
+  "simulatedLatencyMs": 0,
+  "simulatedJitterMs": 0,
+  "simulatedLossPercent": 0.0,
+  "simulationSeed": 1337
+}
