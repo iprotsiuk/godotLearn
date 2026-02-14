@@ -99,3 +99,7 @@ SIM_ENABLE=1 SIM_LATENCY_MS=60 SIM_JITTER_MS=10 SIM_LOSS_PERCENT=0.5 ./Scripts/r
 - Do not change CH1 away from `UnreliableOrdered` during baseline validation.
 - Do not reintroduce gap-skip server input consumption.
 - Do not apply local camera transform from hidden authoritative server node.
+
+## Notes
+
+- Arching movement was due to per-axis accel; fixed via vector `MoveToward`.

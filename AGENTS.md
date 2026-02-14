@@ -27,6 +27,7 @@ NetRunnerSlice is a Godot 4.6 .NET multiplayer FPS movement vertical slice focus
   - channel 0 is reserved for SceneMultiplayer internals.
 - Keep yaw/pitch in input and snapshot payloads.
 - Keep time sync + interpolation pipeline active for remote smoothing.
+- We disable SceneTree multiplayer_poll and call `Multiplayer.Poll()` in `_PhysicsProcess` so packet handling and reconciliation happen in a deterministic fixed-step loop.
 
 ## Scene Flow
 

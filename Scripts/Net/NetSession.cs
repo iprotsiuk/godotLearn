@@ -49,10 +49,8 @@ public partial class NetSession : Node
     private Transform3D _spawnOrigin = Transform3D.Identity;
     private float _spawnYaw;
     private SceneMultiplayer? _sceneMultiplayer;
-
     private NetworkSimulator? _simulator;
     private NetClock? _netClock;
-
     private uint _serverTick;
     private uint _clientTick;
     private int _localPeerId;
@@ -73,19 +71,13 @@ public partial class NetSession : Node
     private float _jitterMs;
     private ushort _pingSeq;
     private double _nextPingTimeSec;
-
     private readonly Dictionary<ushort, double> _pingSent = new();
-
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
     private uint _lastAckedSeq;
-
     private PlayerCharacter? _localCharacter;
-
     public bool IsServer => _mode == RunMode.ListenServer;
-
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
-
     public SessionMetrics Metrics { get; private set; }
 
     public void Initialize(NetworkConfig config, Node3D playerRoot)
@@ -108,7 +100,6 @@ public partial class NetSession : Node
         _simJitter = jitter;
         _simLoss = loss;
         _simSeed = seed;
-
         _simulator?.Configure(_simEnabled, _simLatency, _simJitter, _simLoss);
     }
 
@@ -128,6 +119,8 @@ public partial class NetSession : Node
 
     public override void _Ready()
     {
+        // Godot polls MultiplayerAPI during process_frame by default; we poll manually in physics for fixed-step netcode.
+        GetTree().SetMultiplayerPollEnabled(false);
         Multiplayer.PeerConnected += OnPeerConnected;
         Multiplayer.PeerDisconnected += OnPeerDisconnected;
         Multiplayer.ConnectedToServer += OnConnectedToServer;
@@ -146,6 +139,10 @@ public partial class NetSession : Node
 
     public override void _PhysicsProcess(double delta)
     {
+        if (Multiplayer.MultiplayerPeer is not null)
+        {
+            Multiplayer.Poll();
+        }
         if (_mode == RunMode.None)
         {
             return;
@@ -171,7 +168,6 @@ public partial class NetSession : Node
         {
             return;
         }
-
         UpdateRemoteInterpolation();
         UpdateMetrics();
     }
@@ -182,7 +178,6 @@ public partial class NetSession : Node
         {
             return;
         }
-
         if (@event is InputEventMouseMotion mouseMotion && Input.MouseMode == Input.MouseModeEnum.Captured)
         {
             float maxPitch = Mathf.DegToRad(_config.PitchClampDegrees);
@@ -196,7 +191,6 @@ public partial class NetSession : Node
         {
             Input.MouseMode = Input.MouseModeEnum.Visible;
         }
-
         if (@event is InputEventMouseButton mouseButton && mouseButton.Pressed && mouseButton.ButtonIndex == MouseButton.Left)
         {
             Input.MouseMode = Input.MouseModeEnum.Captured;
@@ -214,7 +208,6 @@ public partial class NetSession : Node
             GD.PushError($"CreateServer failed: {err}");
             return false;
         }
-
         Multiplayer.MultiplayerPeer = peer;
         _mode = RunMode.ListenServer;
         _localPeerId = Multiplayer.GetUniqueId();
@@ -242,7 +235,6 @@ public partial class NetSession : Node
             GD.PushError($"CreateClient failed: {err}");
             return false;
         }
-
         Multiplayer.MultiplayerPeer = peer;
         _mode = RunMode.Client;
         _simulator = new NetworkSimulator(_simSeed, SendPacketNow);
@@ -273,7 +265,6 @@ public partial class NetSession : Node
         _lastAckedSeq = 0;
         _lastCorrectionMeters = 0.0f;
         _pendingInputs = new InputHistoryBuffer();
-
         foreach (ServerPlayer player in _serverPlayers.Values)
         {
             player.Character.QueueFree();
@@ -283,10 +274,8 @@ public partial class NetSession : Node
         {
             remote.Character.QueueFree();
         }
-
         _serverPlayers.Clear();
         _remotePlayers.Clear();
-
         _localCharacter?.QueueFree();
         _localCharacter = null;
         _localPeerId = 0;
@@ -299,9 +288,6 @@ public partial class NetSession : Node
             Multiplayer.MultiplayerPeer.Close();
             Multiplayer.MultiplayerPeer = null;
         }
-
         Input.MouseMode = Input.MouseModeEnum.Visible;
     }
-
-    
 }

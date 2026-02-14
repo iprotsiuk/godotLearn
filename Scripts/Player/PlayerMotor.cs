@@ -22,8 +22,10 @@ public static class PlayerMotor
 		Vector3 desiredHorizontal = worldWish * config.MoveSpeed;
 
 		float accel = wasGrounded ? config.GroundAcceleration : (config.AirAcceleration * config.AirControlFactor);
-		velocity.X = Mathf.MoveToward(velocity.X, desiredHorizontal.X, accel * input.DtFixed);
-		velocity.Z = Mathf.MoveToward(velocity.Z, desiredHorizontal.Z, accel * input.DtFixed);
+		Vector3 horizontalVelocity = new Vector3(velocity.X, 0.0f, velocity.Z);
+		horizontalVelocity = horizontalVelocity.MoveToward(desiredHorizontal, accel * input.DtFixed);
+		velocity.X = horizontalVelocity.X;
+		velocity.Z = horizontalVelocity.Z;
 
 		bool jumpPressed = (input.Buttons & InputButtons.JumpPressed) != 0;
 		if (wasGrounded)
