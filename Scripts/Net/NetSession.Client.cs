@@ -196,6 +196,16 @@ public partial class NetSession
         {
             _localCharacter.AddRenderCorrection(correctionOffset, _config.ReconciliationSmoothMs);
         }
+
+        Vector3 viewCorrection = new(0.0f, correctionDelta.Y, 0.0f);
+        if (Mathf.Abs(correctionDelta.Y) > 0.5f)
+        {
+            _localCharacter.ClearViewCorrection();
+        }
+        else
+        {
+            _localCharacter.AddViewCorrection(viewCorrection, _config.ReconciliationSmoothMs);
+        }
     }
 
     private void UpdateRemoteInterpolation()

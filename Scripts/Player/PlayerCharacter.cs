@@ -18,6 +18,8 @@ public partial class PlayerCharacter : CharacterBody3D
 
 	private Vector3 _renderOffset;
 	private float _renderSmoothSec = 0.1f;
+	private Vector3 _viewOffset;
+	private float _viewSmoothSec = 0.1f;
 	private bool _jumpLocked;
 	private bool _hasLeftGroundSinceJump;
 	private bool _groundedOverrideValid;
@@ -121,12 +123,29 @@ public partial class PlayerCharacter : CharacterBody3D
 		if (_renderOffset.LengthSquared() <= 0.000001f)
 		{
 			_visualRoot.Position = Vector3.Zero;
+		}
+		else
+		{
+			float renderT = 1.0f - Mathf.Exp((float)(-delta / Mathf.Max(0.001f, _renderSmoothSec)));
+			_renderOffset = _renderOffset.Lerp(Vector3.Zero, renderT);
+			_visualRoot.Position = _renderOffset;
+		}
+
+		if (_camera is null)
+		{
 			return;
 		}
 
-		float t = 1.0f - Mathf.Exp((float)(-delta / Mathf.Max(0.001f, _renderSmoothSec)));
-		_renderOffset = _renderOffset.Lerp(Vector3.Zero, t);
-		_visualRoot.Position = _renderOffset;
+		if (_viewOffset.LengthSquared() <= 0.000001f)
+		{
+			_cameraYawRoot.Position = Vector3.Zero;
+		}
+		else
+		{
+			float viewT = 1.0f - Mathf.Exp((float)(-delta / Mathf.Max(0.001f, _viewSmoothSec)));
+			_viewOffset = _viewOffset.Lerp(Vector3.Zero, viewT);
+			_cameraYawRoot.Position = _viewOffset;
+		}
 	}
 
 	public void SetLook(float yaw, float pitch)
@@ -156,6 +175,21 @@ public partial class PlayerCharacter : CharacterBody3D
 	{
 		_renderOffset = Vector3.Zero;
 		_visualRoot.Position = Vector3.Zero;
+	}
+
+	public void AddViewCorrection(Vector3 offset, int smoothMs)
+	{
+		_viewOffset += offset;
+		_viewSmoothSec = Mathf.Max(0.01f, smoothMs / 1000.0f);
+	}
+
+	public void ClearViewCorrection()
+	{
+		_viewOffset = Vector3.Zero;
+		if (_camera is not null)
+		{
+			_cameraYawRoot.Position = Vector3.Zero;
+		}
 	}
 
 	public void OnJump()
