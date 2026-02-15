@@ -7,6 +7,26 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private int GetEffectiveInputDelayTicksForPeer(int peerId)
+    {
+        int maxSafeDelayTicks = NetConstants.MaxInputRedundancy - 1;
+        int configuredDelayTicks = _config.ServerInputDelayTicks;
+        int clampedConfigured = Mathf.Clamp(configuredDelayTicks, 0, maxSafeDelayTicks);
+        if (configuredDelayTicks != clampedConfigured && !_inputDelayClampWarned)
+        {
+            GD.PushWarning(
+                $"ServerInputDelayTicks={configuredDelayTicks} exceeds redundancy window; clamped to {clampedConfigured} (MaxInputRedundancy={NetConstants.MaxInputRedundancy}).");
+            _inputDelayClampWarned = true;
+        }
+
+        if (_mode == RunMode.ListenServer && peerId == _localPeerId)
+        {
+            return 0;
+        }
+
+        return Mathf.Max(1, clampedConfigured);
+    }
+
     private void ServerPeerConnected(int peerId)
     {
         if (_serverPlayers.ContainsKey(peerId))
@@ -24,21 +44,14 @@ public partial class NetSession
         _serverTick++;
 
         float fixedDt = 1.0f / _config.ServerTickRate;
-        int maxSafeDelayTicks = NetConstants.MaxInputRedundancy - 1;
-        int configuredDelayTicks = _config.ServerInputDelayTicks;
-        int delayTicks = Mathf.Clamp(configuredDelayTicks, 0, maxSafeDelayTicks);
-        uint delayTicksU = (uint)delayTicks;
-        if (configuredDelayTicks != delayTicks && !_inputDelayClampWarned)
-        {
-            GD.PushWarning(
-                $"ServerInputDelayTicks={configuredDelayTicks} exceeds redundancy window; clamped to {delayTicks} (MaxInputRedundancy={NetConstants.MaxInputRedundancy}).");
-            _inputDelayClampWarned = true;
-        }
 
         foreach (KeyValuePair<int, ServerPlayer> pair in _serverPlayers)
         {
+            int peerId = pair.Key;
             ServerPlayer player = pair.Value;
             InputCommand command;
+            int delayTicks = GetEffectiveInputDelayTicksForPeer(peerId);
+            uint delayTicksU = (uint)delayTicks;
 
             if (!player.HasStartedInputStream)
             {

@@ -28,6 +28,7 @@ public partial class NetSession
                         ServerPeerConnected(fromPeer);
                     }
 
+                    int effectiveDelay = GetEffectiveInputDelayTicksForPeer(fromPeer);
                     NetCodec.WriteControlWelcome(
                         _controlPacket,
                         fromPeer,
@@ -45,7 +46,7 @@ public partial class NetSession
                         _config.AirControlFactor,
                         _config.JumpVelocity,
                         _config.Gravity,
-                        _config.ServerInputDelayTicks,
+                        effectiveDelay,
                         _config.FloorSnapLength,
                         _config.GroundStickVelocity);
                     SendPacket(fromPeer, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
