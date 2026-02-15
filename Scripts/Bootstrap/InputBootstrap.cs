@@ -14,6 +14,7 @@ public static class InputBootstrap
         EnsureKeyAction("jump", Key.Space);
         EnsureKeyAction("quit", Key.Escape);
         EnsureKeyAction("toggle_debug", Key.F1);
+        EnsureMouseAction("fire", MouseButton.Left);
     }
 
     private static void EnsureKeyAction(string action, Key key)
@@ -38,5 +39,28 @@ public static class InputBootstrap
             Pressed = false
         };
         InputMap.ActionAddEvent(action, eventKey);
+    }
+
+    private static void EnsureMouseAction(string action, MouseButton button)
+    {
+        if (!InputMap.HasAction(action))
+        {
+            InputMap.AddAction(action);
+        }
+
+        foreach (InputEvent existing in InputMap.ActionGetEvents(action))
+        {
+            if (existing is InputEventMouseButton mouseEvent && mouseEvent.ButtonIndex == button)
+            {
+                return;
+            }
+        }
+
+        InputEventMouseButton eventMouse = new()
+        {
+            ButtonIndex = button,
+            Pressed = false
+        };
+        InputMap.ActionAddEvent(action, eventMouse);
     }
 }

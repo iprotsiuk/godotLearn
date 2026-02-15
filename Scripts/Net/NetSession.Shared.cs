@@ -26,6 +26,12 @@ public partial class NetSession
             case PacketType.Control:
                 HandleControl(fromPeer, packet);
                 break;
+            case PacketType.Fire:
+                HandleFire(fromPeer, packet);
+                break;
+            case PacketType.FireResult:
+                HandleFireResult(packet);
+                break;
         }
     }
 

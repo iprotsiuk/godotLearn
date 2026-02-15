@@ -97,5 +97,6 @@ public partial class NetSession
         Input.ActionRelease("move_left");
         Input.ActionRelease("move_right");
         Input.ActionRelease("jump");
+        Input.ActionRelease("fire");
     }
 }

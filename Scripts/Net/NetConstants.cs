@@ -18,6 +18,8 @@ public static class NetConstants
 
     public const int InputCommandBytes = 33;
     public const int SnapshotStateBytes = 41;
+    public const int FirePacketBytes = 26;
+    public const int FireResultPacketBytes = 13;
 
     public const int InputPacketBytes = 2 + (InputCommandBytes * MaxInputRedundancy);
     public const int SnapshotPacketBytes = 6 + (SnapshotStateBytes * MaxPlayers);
@@ -39,7 +41,9 @@ public enum PacketType : byte
 {
     InputBundle = 1,
     Snapshot = 2,
-    Control = 3
+    Control = 3,
+    Fire = 4,
+    FireResult = 5
 }
 
 public enum ControlType : byte

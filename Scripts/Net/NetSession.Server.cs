@@ -206,6 +206,8 @@ public partial class NetSession
             PlayerMotor.Simulate(player.Character, command, _config);
         }
 
+        RecordRewindFrame(_serverTick);
+
         if ((_serverTick % (uint)_snapshotEveryTicks) != 0)
         {
             return;

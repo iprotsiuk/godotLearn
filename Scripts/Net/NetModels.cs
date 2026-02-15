@@ -43,6 +43,22 @@ public struct RemoteSample
     public bool Grounded;
 }
 
+public struct FireRequest
+{
+    public uint EstimatedServerTickAtFire;
+    public uint InputEpoch;
+    public Vector3 Origin;
+    public float Yaw;
+    public float Pitch;
+}
+
+public struct FireResult
+{
+    public int ShooterPeerId;
+    public int HitPeerId;
+    public uint ValidatedServerTick;
+}
+
 public struct SessionMetrics
 {
     public uint ServerTick;

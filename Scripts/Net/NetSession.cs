@@ -7,6 +7,11 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession : Node
 {
+    private const int RewindHistoryTicks = 120;
+    private const float WeaponMaxRange = 200.0f;
+    private const float WeaponTargetRadius = 0.5f;
+    private const float WeaponOriginMaxOffset = 1.5f;
+
     private enum RunMode
     {
         None,
@@ -38,6 +43,20 @@ public partial class NetSession : Node
         public required PlayerCharacter Character;
         public RemoteSnapshotBuffer Buffer { get; } = new();
     }
+
+    private struct RewindSample
+    {
+        public int PeerId;
+        public Vector3 Position;
+    }
+
+    private readonly uint[] _rewindTicks = new uint[RewindHistoryTicks];
+    private readonly int[] _rewindCounts = new int[RewindHistoryTicks];
+    private readonly RewindSample[,] _rewindSamples = new RewindSample[RewindHistoryTicks, NetConstants.MaxPlayers];
+    private readonly byte[] _firePacket = new byte[NetConstants.FirePacketBytes];
+    private readonly byte[] _fireResultPacket = new byte[NetConstants.FireResultPacketBytes];
+    private readonly List<(PlayerCharacter Character, Vector3 Position)> _rewindRestoreScratch = new(NetConstants.MaxPlayers);
+    private readonly List<(Node3D Node, double ExpireAt)> _debugDrawNodes = new(32);
 
     private readonly Dictionary<int, ServerPlayer> _serverPlayers = new();
     private readonly Dictionary<int, RemoteEntity> _remotePlayers = new();
@@ -177,6 +196,7 @@ public partial class NetSession : Node
         }
         CaptureInputState();
         UpdateRemoteInterpolation();
+        UpdateDebugDraws(Time.GetTicksMsec() / 1000.0);
         UpdateMetrics();
     }
 
@@ -197,6 +217,10 @@ public partial class NetSession : Node
         if (@event.IsActionPressed("jump"))
         {
             TryLatchGroundedJump();
+        }
+        if (@event.IsActionPressed("fire"))
+        {
+            TryFireWeapon();
         }
 
         if (@event.IsActionPressed("quit"))
@@ -288,6 +312,16 @@ public partial class NetSession : Node
         _jumpPressRepeatTicksRemaining = 0;
         _inputState = default;
         _pendingInputs = new InputHistoryBuffer();
+        foreach ((Node3D node, _) in _debugDrawNodes)
+        {
+            if (GodotObject.IsInstanceValid(node))
+            {
+                node.QueueFree();
+            }
+        }
+        _debugDrawNodes.Clear();
+        System.Array.Clear(_rewindTicks);
+        System.Array.Clear(_rewindCounts);
         foreach (ServerPlayer player in _serverPlayers.Values)
         {
             player.Character.QueueFree();
