@@ -8,6 +8,7 @@ namespace NetRunnerSlice.Net;
 public partial class NetSession : Node
 {
     private const int RewindHistoryTicks = 120;
+    private const double ServerDiagnosticsLogIntervalSec = 2.0;
     private const float WeaponMaxRange = 200.0f;
     private const float WeaponTargetRadius = 0.5f;
     private const float WeaponOriginMaxOffset = 1.5f;
@@ -25,8 +26,6 @@ public partial class NetSession : Node
         public required PlayerCharacter Character;
         public ServerInputBuffer Inputs { get; } = new();
         public readonly Dictionary<ushort, double> PendingPings = new();
-        public bool ExpectedInputTickInitialized;
-        public uint ExpectedInputTick;
         public uint CurrentInputEpoch = 1;
         public int MissingInputTicks;
         public int PendingSafetyNeutralTicks;
@@ -37,6 +36,13 @@ public partial class NetSession : Node
         public double NextPingAtSec;
         public uint LastProcessedSeq;
         public InputCommand LastInput;
+        public uint DroppedOldInputCount;
+        public uint DroppedFutureInputCount;
+        public uint TicksUsedBufferedInput;
+        public uint TicksUsedHoldLast;
+        public uint TicksUsedNeutral;
+        public uint MissingInputStreakCurrent;
+        public uint MissingInputStreakMax;
     }
 
     private sealed class RemoteEntity
@@ -100,12 +106,23 @@ public partial class NetSession : Node
     private ushort _pingSeq;
     private double _nextPingTimeSec;
     private readonly Dictionary<ushort, double> _pingSent = new();
+    private double _nextServerDiagnosticsLogAtSec;
     private bool _hasFocus = true;
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
     private uint _lastSentInputTick;
     private uint _lastAckedSeq;
     private uint _inputEpoch = 1;
+    private uint _serverDroppedOldInputCount;
+    private uint _serverDroppedFutureInputCount;
+    private uint _serverTicksUsedBufferedInput;
+    private uint _serverTicksUsedHoldLast;
+    private uint _serverTicksUsedNeutral;
+    private uint _serverMissingInputStreakCurrent;
+    private uint _serverMissingInputStreakMax;
+    private int _serverEffectiveDelayTicks = -1;
+    private float _serverPeerRttMs = -1.0f;
+    private float _serverPeerJitterMs = -1.0f;
     private PlayerCharacter? _localCharacter;
     public bool IsServer => _mode == RunMode.ListenServer || _mode == RunMode.DedicatedServer;
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
@@ -345,9 +362,20 @@ public partial class NetSession : Node
         _dynamicInterpolationDelayMs = 0.0f;
         _pingSeq = 0;
         _nextPingTimeSec = 0.0;
+        _nextServerDiagnosticsLogAtSec = 0.0;
         _jumpPressRepeatTicksRemaining = 0;
         _inputState = default;
         _pendingInputs = new InputHistoryBuffer();
+        _serverDroppedOldInputCount = 0;
+        _serverDroppedFutureInputCount = 0;
+        _serverTicksUsedBufferedInput = 0;
+        _serverTicksUsedHoldLast = 0;
+        _serverTicksUsedNeutral = 0;
+        _serverMissingInputStreakCurrent = 0;
+        _serverMissingInputStreakMax = 0;
+        _serverEffectiveDelayTicks = -1;
+        _serverPeerRttMs = -1.0f;
+        _serverPeerJitterMs = -1.0f;
         ClearProjectileVisuals();
         ClearHitIndicator();
         foreach ((Node3D node, _) in _debugDrawNodes)

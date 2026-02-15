@@ -7,6 +7,40 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private static void IncrementMissingInputStreak(ServerPlayer player)
+    {
+        player.MissingInputStreakCurrent++;
+        if (player.MissingInputStreakCurrent > player.MissingInputStreakMax)
+        {
+            player.MissingInputStreakMax = player.MissingInputStreakCurrent;
+        }
+    }
+
+    private void LogServerDiagnosticsIfDue(double nowSec)
+    {
+        if (nowSec < _nextServerDiagnosticsLogAtSec)
+        {
+            return;
+        }
+
+        _nextServerDiagnosticsLogAtSec = nowSec + ServerDiagnosticsLogIntervalSec;
+        foreach (KeyValuePair<int, ServerPlayer> pair in _serverPlayers)
+        {
+            int peerId = pair.Key;
+            ServerPlayer player = pair.Value;
+            ulong totalUsage = (ulong)player.TicksUsedBufferedInput + player.TicksUsedHoldLast + player.TicksUsedNeutral;
+            float bufferedPct = totalUsage == 0
+                ? 0.0f
+                : (100.0f * player.TicksUsedBufferedInput) / totalUsage;
+
+            GD.Print(
+                $"ServerWANDiag: peer={peerId} delayTicks={player.EffectiveInputDelayTicks} rtt={player.RttMs:0.0}ms jitter={player.JitterMs:0.0}ms " +
+                $"drops(old/future)={player.DroppedOldInputCount}/{player.DroppedFutureInputCount} " +
+                $"usage(buffered/hold/neutral)={player.TicksUsedBufferedInput}/{player.TicksUsedHoldLast}/{player.TicksUsedNeutral} bufferedPct={bufferedPct:0.0}% " +
+                $"missingStreak(cur/max)={player.MissingInputStreakCurrent}/{player.MissingInputStreakMax}");
+        }
+    }
+
     private int ComputeWanDelayTicks(float rttMs)
     {
         float tickMs = 1000.0f / Mathf.Max(1, _config.ServerTickRate);
@@ -37,14 +71,6 @@ public partial class NetSession
         }
 
         player.EffectiveInputDelayTicks = nextDelayTicks;
-        if (player.ExpectedInputTickInitialized)
-        {
-            uint minExpected = _serverTick + (uint)Mathf.Max(0, nextDelayTicks);
-            if (player.ExpectedInputTick < minExpected)
-            {
-                player.ExpectedInputTick = minExpected;
-            }
-        }
 
         if (!sendDelayUpdate || (_mode == RunMode.ListenServer && peerId == _localPeerId))
         {
@@ -53,17 +79,6 @@ public partial class NetSession
 
         NetCodec.WriteControlDelayUpdate(_controlPacket, nextDelayTicks);
         SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
-    }
-
-    private void EnsureExpectedInputTickInitialized(ServerPlayer player)
-    {
-        if (player.ExpectedInputTickInitialized)
-        {
-            return;
-        }
-
-        player.ExpectedInputTick = _serverTick + (uint)Mathf.Max(0, player.EffectiveInputDelayTicks);
-        player.ExpectedInputTickInitialized = true;
     }
 
     private static InputCommand BuildNeutralInput(in InputCommand basis, uint inputTick, float fixedDt, uint epoch)
@@ -84,9 +99,8 @@ public partial class NetSession
         player.MissingInputTicks = 0;
         player.PendingSafetyNeutralTicks = 1;
         UpdateEffectiveInputDelayForPeer(peerId, player, sendDelayUpdate: false);
-        player.ExpectedInputTick = _serverTick + (uint)Mathf.Max(0, player.EffectiveInputDelayTicks);
-        player.ExpectedInputTickInitialized = true;
-        player.LastInput = BuildNeutralInput(player.LastInput, player.ExpectedInputTick, 1.0f / _config.ServerTickRate, player.CurrentInputEpoch);
+        uint neededTick = _serverTick + 1;
+        player.LastInput = BuildNeutralInput(player.LastInput, neededTick, 1.0f / _config.ServerTickRate, player.CurrentInputEpoch);
     }
 
     private void SendServerPingIfDue(int peerId, ServerPlayer player, double nowSec)
@@ -155,12 +169,13 @@ public partial class NetSession
             int peerId = pair.Key;
             ServerPlayer player = pair.Value;
             UpdateEffectiveInputDelayForPeer(peerId, player, sendDelayUpdate: true);
-            EnsureExpectedInputTickInitialized(player);
             SendServerPingIfDue(peerId, player, nowSec);
 
-            uint neededTick = player.ExpectedInputTick;
+            uint neededTick = _serverTick;
             InputCommand command;
             bool usedBufferedInput = false;
+            bool usedHoldLast = false;
+            bool usedNeutral = false;
 
             if (player.PendingSafetyNeutralTicks > 0)
             {
@@ -168,6 +183,7 @@ public partial class NetSession
                 player.LastInput = command;
                 player.PendingSafetyNeutralTicks--;
                 player.MissingInputTicks = NetConstants.HoldLastInputTicks + 1;
+                usedNeutral = true;
             }
             else if (player.Inputs.TryTake(neededTick, out command) &&
                      InputSanitizer.TrySanitizeServer(ref command, _config))
@@ -187,12 +203,30 @@ public partial class NetSession
                 command.Buttons &= ~InputButtons.JumpPressed;
                 command.DtFixed = fixedDt;
                 player.MissingInputTicks++;
+                usedHoldLast = true;
             }
             else
             {
                 command = BuildNeutralInput(player.LastInput, neededTick, fixedDt, player.CurrentInputEpoch);
                 player.LastInput = command;
                 player.MissingInputTicks++;
+                usedNeutral = true;
+            }
+
+            if (usedBufferedInput)
+            {
+                player.TicksUsedBufferedInput++;
+                player.MissingInputStreakCurrent = 0;
+            }
+            else if (usedHoldLast)
+            {
+                player.TicksUsedHoldLast++;
+                IncrementMissingInputStreak(player);
+            }
+            else if (usedNeutral)
+            {
+                player.TicksUsedNeutral++;
+                IncrementMissingInputStreak(player);
             }
 
             if (!usedBufferedInput)
@@ -200,12 +234,11 @@ public partial class NetSession
                 command.DtFixed = fixedDt;
             }
 
-            player.ExpectedInputTick = neededTick + 1;
-
             player.Character.SetLook(command.Yaw, command.Pitch);
             PlayerMotor.Simulate(player.Character, command, _config);
         }
 
+        LogServerDiagnosticsIfDue(nowSec);
         RecordRewindFrame(_serverTick);
 
         if ((_serverTick % (uint)_snapshotEveryTicks) != 0)
@@ -247,7 +280,17 @@ public partial class NetSession
                 Vel = player.Character.Velocity,
                 Yaw = player.Character.Yaw,
                 Pitch = player.Character.Pitch,
-                Grounded = player.Character.Grounded
+                Grounded = player.Character.Grounded,
+                DroppedOldInputCount = player.DroppedOldInputCount,
+                DroppedFutureInputCount = player.DroppedFutureInputCount,
+                TicksUsedBufferedInput = player.TicksUsedBufferedInput,
+                TicksUsedHoldLast = player.TicksUsedHoldLast,
+                TicksUsedNeutral = player.TicksUsedNeutral,
+                MissingInputStreakCurrent = player.MissingInputStreakCurrent,
+                MissingInputStreakMax = player.MissingInputStreakMax,
+                EffectiveDelayTicks = player.EffectiveInputDelayTicks,
+                ServerPeerRttMs = player.RttMs,
+                ServerPeerJitterMs = player.JitterMs
             };
         }
 
@@ -288,16 +331,17 @@ public partial class NetSession
                 ResetPeerForEpoch(fromPeer, serverPlayer, command.InputEpoch);
             }
 
-            EnsureExpectedInputTickInitialized(serverPlayer);
-            uint expectedInputTick = serverPlayer.ExpectedInputTick;
-            if (command.InputTick < expectedInputTick)
+            uint neededTick = _serverTick + 1;
+            if (command.InputTick < neededTick)
             {
+                serverPlayer.DroppedOldInputCount++;
                 continue;
             }
 
-            uint maxFutureInputTick = expectedInputTick + (uint)NetConstants.MaxFutureInputTicks;
+            uint maxFutureInputTick = neededTick + (uint)NetConstants.MaxFutureInputTicks;
             if (command.InputTick > maxFutureInputTick)
             {
+                serverPlayer.DroppedFutureInputCount++;
                 continue;
             }
 

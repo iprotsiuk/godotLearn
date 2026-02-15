@@ -93,6 +93,59 @@ SIM_ENABLE=1 SIM_LATENCY_MS=60 SIM_JITTER_MS=10 SIM_LOSS_PERCENT=0.5 ./Scripts/r
 
 8. If failure occurs, use the symptom table above and capture temporary logs before edits.
 
+## WAN Input Quality Diagnostics Recipe (Approx 50ms RTT)
+
+Use this recipe to validate the new WAN input diagnostics counters and trends.
+
+1. Start host and one client with matching net-sim:
+
+```bash
+SIM_ENABLE=1 SIM_LATENCY_MS=25 SIM_JITTER_MS=5 SIM_LOSS_PERCENT=0.5 ./Scripts/run_host.sh 7777
+SIM_ENABLE=1 SIM_LATENCY_MS=25 SIM_JITTER_MS=5 SIM_LOSS_PERCENT=0.5 ./Scripts/run_client.sh 127.0.0.1 7777 1
+```
+
+2. Run continuous movement + direction changes for 2-3 minutes.
+
+3. Inspect metrics:
+- Client `F1` overlay:
+  - `ServerDiag Usage buffered/hold/neutral`
+  - `ServerDiag Drops old/future`
+  - `ServerDiag Missing streak cur/max`
+  - `ServerDiag EffectiveDelayTicks`, `ServerDiag RTT/Jitter`
+  - `Pending Inputs Count`, `Last Acked Seq`, `Last Correction XZ/Y/3D`
+- Server console (`listen` and `dedicated`): periodic `ServerWANDiag: ...` lines per peer.
+
+4. Good baseline under this profile:
+- `buffered` usage near 100% over time (small short dips are acceptable).
+- `hold` and `neutral` much lower than buffered.
+- `dropped_old` and `dropped_future` near zero (occasional non-zero is possible during stalls or focus changes).
+- `missing streak current` usually returns to 0 quickly; `max` should not keep climbing rapidly.
+- `Pending Inputs Count` remains bounded and `Last Acked Seq` advances continuously.
+
+## Focused WAN Scheduling Tests (Server-Authoritative Tick Consumption)
+
+Use these targeted checks after scheduling changes.
+
+1. Launch host + client at approx 50ms RTT:
+
+```bash
+SIM_ENABLE=1 SIM_LATENCY_MS=25 SIM_JITTER_MS=5 SIM_LOSS_PERCENT=0.5 ./Scripts/run_host.sh 7777
+SIM_ENABLE=1 SIM_LATENCY_MS=25 SIM_JITTER_MS=5 SIM_LOSS_PERCENT=0.5 ./Scripts/run_client.sh 127.0.0.1 7777 1
+```
+
+2. Test A: hold `W` for 3s, then fully release.
+- Expected: authoritative/server motion stops promptly after release; no continued “push” from stale inputs.
+- Validate via remote view and server diagnostics.
+
+3. Test B: missing input quality under same profile.
+- Expected: `ServerDiag Usage buffered/hold/neutral` is dominated by `buffered`.
+- Expected: `ServerDiag Missing streak cur/max` stays low; current streak should return to `0` frequently.
+- Expected: `ServerDiag Drops old/future` remains near `0`.
+
+4. Test C: listen-server local delay behavior.
+- Run listen host only.
+- Expected: local peer diagnostics show `ServerDiag EffectiveDelayTicks: 0`.
+
 ## Non-negotiable Invariants During Debugging
 
 - Do not bypass prediction/reconciliation for listen host local player.

@@ -194,6 +194,35 @@ public partial class NetSession
             jitterMs = -1.0f;
         }
         float dynamicInterpDelayMs = IsClient ? _dynamicInterpolationDelayMs : -1.0f;
+        uint serverDroppedOldInputCount = _serverDroppedOldInputCount;
+        uint serverDroppedFutureInputCount = _serverDroppedFutureInputCount;
+        uint serverTicksUsedBufferedInput = _serverTicksUsedBufferedInput;
+        uint serverTicksUsedHoldLast = _serverTicksUsedHoldLast;
+        uint serverTicksUsedNeutral = _serverTicksUsedNeutral;
+        uint serverMissingInputStreakCurrent = _serverMissingInputStreakCurrent;
+        uint serverMissingInputStreakMax = _serverMissingInputStreakMax;
+        int serverEffectiveDelayTicks = _serverEffectiveDelayTicks;
+        float serverPeerRttMs = _serverPeerRttMs;
+        float serverPeerJitterMs = _serverPeerJitterMs;
+
+        if (IsServer && _localPeerId != 0 && _serverPlayers.TryGetValue(_localPeerId, out ServerPlayer? localServerPlayer))
+        {
+            serverDroppedOldInputCount = localServerPlayer.DroppedOldInputCount;
+            serverDroppedFutureInputCount = localServerPlayer.DroppedFutureInputCount;
+            serverTicksUsedBufferedInput = localServerPlayer.TicksUsedBufferedInput;
+            serverTicksUsedHoldLast = localServerPlayer.TicksUsedHoldLast;
+            serverTicksUsedNeutral = localServerPlayer.TicksUsedNeutral;
+            serverMissingInputStreakCurrent = localServerPlayer.MissingInputStreakCurrent;
+            serverMissingInputStreakMax = localServerPlayer.MissingInputStreakMax;
+            serverEffectiveDelayTicks = localServerPlayer.EffectiveInputDelayTicks;
+            serverPeerRttMs = localServerPlayer.RttMs;
+            serverPeerJitterMs = localServerPlayer.JitterMs;
+            if (_mode == RunMode.ListenServer)
+            {
+                rttMs = localServerPlayer.RttMs;
+                jitterMs = localServerPlayer.JitterMs;
+            }
+        }
 
         Metrics = new SessionMetrics
         {
@@ -216,7 +245,17 @@ public partial class NetSession
             SimLatencyMs = _simLatency,
             SimJitterMs = _simJitter,
             SimLossPercent = _simLoss,
-            DynamicInterpolationDelayMs = dynamicInterpDelayMs
+            DynamicInterpolationDelayMs = dynamicInterpDelayMs,
+            ServerDroppedOldInputCount = serverDroppedOldInputCount,
+            ServerDroppedFutureInputCount = serverDroppedFutureInputCount,
+            ServerTicksUsedBufferedInput = serverTicksUsedBufferedInput,
+            ServerTicksUsedHoldLast = serverTicksUsedHoldLast,
+            ServerTicksUsedNeutral = serverTicksUsedNeutral,
+            ServerMissingInputStreakCurrent = serverMissingInputStreakCurrent,
+            ServerMissingInputStreakMax = serverMissingInputStreakMax,
+            ServerEffectiveDelayTicks = serverEffectiveDelayTicks,
+            ServerPeerRttMs = serverPeerRttMs,
+            ServerPeerJitterMs = serverPeerJitterMs
         };
     }
 }

@@ -36,7 +36,7 @@ public partial class DebugOverlay : CanvasLayer
 
         _panel = new Panel
         {
-            CustomMinimumSize = new Vector2(470.0f, 280.0f),
+            CustomMinimumSize = new Vector2(540.0f, 380.0f),
             MouseFilter = Control.MouseFilterEnum.Stop
         };
         root.AddChild(_panel);
@@ -44,7 +44,7 @@ public partial class DebugOverlay : CanvasLayer
         VBoxContainer vbox = new()
         {
             Position = new Vector2(10.0f, 10.0f),
-            Size = new Vector2(450.0f, 260.0f)
+            Size = new Vector2(520.0f, 360.0f)
         };
         _panel.AddChild(vbox);
 
@@ -53,7 +53,7 @@ public partial class DebugOverlay : CanvasLayer
 
         _statsLabel = new Label
         {
-            CustomMinimumSize = new Vector2(440.0f, 132.0f),
+            CustomMinimumSize = new Vector2(510.0f, 230.0f),
             VerticalAlignment = VerticalAlignment.Top,
             AutowrapMode = TextServer.AutowrapMode.Off
         };
@@ -128,6 +128,12 @@ public partial class DebugOverlay : CanvasLayer
         string interpDelayText = metrics.DynamicInterpolationDelayMs < 0.0f
             ? "N/A"
             : $"{metrics.DynamicInterpolationDelayMs:0.0} ms";
+        string serverPeerRttText = metrics.ServerPeerRttMs < 0.0f ? "N/A" : $"{metrics.ServerPeerRttMs:0.0} ms";
+        string serverPeerJitterText = metrics.ServerPeerJitterMs < 0.0f ? "N/A" : $"{metrics.ServerPeerJitterMs:0.0} ms";
+        uint serverUsageTotal = metrics.ServerTicksUsedBufferedInput + metrics.ServerTicksUsedHoldLast + metrics.ServerTicksUsedNeutral;
+        float bufferedPct = serverUsageTotal == 0
+            ? 0.0f
+            : (100.0f * metrics.ServerTicksUsedBufferedInput) / serverUsageTotal;
 
         _statsLabel.Text =
             $"Role: {(isServer ? "Server" : "")}{(isServer && isClient ? "/" : "")}{(isClient ? "Client" : "")}" +
@@ -135,15 +141,19 @@ public partial class DebugOverlay : CanvasLayer
             $"\nClient Tick: {metrics.ClientTick}" +
             $"\nRTT: {rttText}" +
             $"\nJitter: {jitterText}" +
-            $"\nInterp Delay: {interpDelayText}" +
-            $"\nLast Acked Input: {metrics.LastAckedInput}" +
-            $"\nPending Inputs: {metrics.PendingInputCount}" +
+            $"\nDynamic Interp Delay: {interpDelayText}" +
+            $"\nLast Acked Seq: {metrics.LastAckedInput}" +
+            $"\nPending Inputs Count: {metrics.PendingInputCount}" +
             $"\nJump Repeat Left: {metrics.JumpRepeatRemaining}" +
-            $"\nReconcile XZ (m): {metrics.CorrXZ:0.000}" +
-            $"\nReconcile Y  (m): {metrics.CorrY:0.000}" +
+            $"\nLast Correction XZ/Y/3D (m): {metrics.CorrXZ:0.000} / {metrics.CorrY:0.000} / {metrics.Corr3D:0.000}" +
             $"\nLocal Grounded: {(metrics.LocalGrounded ? "Yes" : "No")}" +
             $"\nMoveSpeed/GroundAccel: {metrics.MoveSpeed:0.###} / {metrics.GroundAcceleration:0.###}" +
-            $"\nInput Delay Ticks: {metrics.ServerInputDelayTicks}" +
+            $"\nServerInputDelayTicks: {metrics.ServerInputDelayTicks}" +
+            $"\nServerDiag Drops old/future: {metrics.ServerDroppedOldInputCount} / {metrics.ServerDroppedFutureInputCount}" +
+            $"\nServerDiag Usage buffered/hold/neutral: {metrics.ServerTicksUsedBufferedInput} / {metrics.ServerTicksUsedHoldLast} / {metrics.ServerTicksUsedNeutral} ({bufferedPct:0.0}% buffered)" +
+            $"\nServerDiag Missing streak cur/max: {metrics.ServerMissingInputStreakCurrent} / {metrics.ServerMissingInputStreakMax}" +
+            $"\nServerDiag EffectiveDelayTicks: {metrics.ServerEffectiveDelayTicks}" +
+            $"\nServerDiag RTT/Jitter: {serverPeerRttText} / {serverPeerJitterText}" +
             $"\nProfile: {_profileName}" +
             $"\nNetSim: {(metrics.NetworkSimulationEnabled ? "ON" : "OFF")} ({metrics.SimLatencyMs}ms/{metrics.SimJitterMs}ms/{metrics.SimLossPercent:0.0}% loss)";
     }

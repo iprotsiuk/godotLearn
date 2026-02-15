@@ -229,6 +229,17 @@ public partial class NetSession
             return;
         }
 
+        _serverDroppedOldInputCount = snapshot.DroppedOldInputCount;
+        _serverDroppedFutureInputCount = snapshot.DroppedFutureInputCount;
+        _serverTicksUsedBufferedInput = snapshot.TicksUsedBufferedInput;
+        _serverTicksUsedHoldLast = snapshot.TicksUsedHoldLast;
+        _serverTicksUsedNeutral = snapshot.TicksUsedNeutral;
+        _serverMissingInputStreakCurrent = snapshot.MissingInputStreakCurrent;
+        _serverMissingInputStreakMax = snapshot.MissingInputStreakMax;
+        _serverEffectiveDelayTicks = snapshot.EffectiveDelayTicks;
+        _serverPeerRttMs = snapshot.ServerPeerRttMs;
+        _serverPeerJitterMs = snapshot.ServerPeerJitterMs;
+
         Vector3 before = _localCharacter.GlobalPosition;
         _localCharacter.GlobalPosition = snapshot.Pos;
         _localCharacter.Velocity = snapshot.Vel;

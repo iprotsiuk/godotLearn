@@ -148,6 +148,26 @@ public static partial class NetCodec
         WriteFloat(packet, offset, state.Pitch);
         offset += 4;
         packet[offset++] = state.Grounded ? (byte)1 : (byte)0;
+        WriteUInt(packet, offset, state.DroppedOldInputCount);
+        offset += 4;
+        WriteUInt(packet, offset, state.DroppedFutureInputCount);
+        offset += 4;
+        WriteUInt(packet, offset, state.TicksUsedBufferedInput);
+        offset += 4;
+        WriteUInt(packet, offset, state.TicksUsedHoldLast);
+        offset += 4;
+        WriteUInt(packet, offset, state.TicksUsedNeutral);
+        offset += 4;
+        WriteUInt(packet, offset, state.MissingInputStreakCurrent);
+        offset += 4;
+        WriteUInt(packet, offset, state.MissingInputStreakMax);
+        offset += 4;
+        WriteInt(packet, offset, state.EffectiveDelayTicks);
+        offset += 4;
+        WriteFloat(packet, offset, state.ServerPeerRttMs);
+        offset += 4;
+        WriteFloat(packet, offset, state.ServerPeerJitterMs);
+        offset += 4;
     }
 
     private static bool ReadState(ReadOnlySpan<byte> packet, ref int offset, out PlayerStateSnapshot state)
@@ -169,6 +189,26 @@ public static partial class NetCodec
         state.Pitch = ReadFloat(packet, offset);
         offset += 4;
         state.Grounded = packet[offset++] != 0;
+        state.DroppedOldInputCount = ReadUInt(packet, offset);
+        offset += 4;
+        state.DroppedFutureInputCount = ReadUInt(packet, offset);
+        offset += 4;
+        state.TicksUsedBufferedInput = ReadUInt(packet, offset);
+        offset += 4;
+        state.TicksUsedHoldLast = ReadUInt(packet, offset);
+        offset += 4;
+        state.TicksUsedNeutral = ReadUInt(packet, offset);
+        offset += 4;
+        state.MissingInputStreakCurrent = ReadUInt(packet, offset);
+        offset += 4;
+        state.MissingInputStreakMax = ReadUInt(packet, offset);
+        offset += 4;
+        state.EffectiveDelayTicks = ReadInt(packet, offset);
+        offset += 4;
+        state.ServerPeerRttMs = ReadFloat(packet, offset);
+        offset += 4;
+        state.ServerPeerJitterMs = ReadFloat(packet, offset);
+        offset += 4;
         return true;
     }
 

@@ -32,6 +32,16 @@ public struct PlayerStateSnapshot
     public float Yaw;
     public float Pitch;
     public bool Grounded;
+    public uint DroppedOldInputCount;
+    public uint DroppedFutureInputCount;
+    public uint TicksUsedBufferedInput;
+    public uint TicksUsedHoldLast;
+    public uint TicksUsedNeutral;
+    public uint MissingInputStreakCurrent;
+    public uint MissingInputStreakMax;
+    public int EffectiveDelayTicks;
+    public float ServerPeerRttMs;
+    public float ServerPeerJitterMs;
 }
 
 public struct RemoteSample
@@ -81,4 +91,14 @@ public struct SessionMetrics
     public int SimJitterMs;
     public float SimLossPercent;
     public float DynamicInterpolationDelayMs;
+    public uint ServerDroppedOldInputCount;
+    public uint ServerDroppedFutureInputCount;
+    public uint ServerTicksUsedBufferedInput;
+    public uint ServerTicksUsedHoldLast;
+    public uint ServerTicksUsedNeutral;
+    public uint ServerMissingInputStreakCurrent;
+    public uint ServerMissingInputStreakMax;
+    public int ServerEffectiveDelayTicks;
+    public float ServerPeerRttMs;
+    public float ServerPeerJitterMs;
 }

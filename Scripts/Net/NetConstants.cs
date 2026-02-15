@@ -17,7 +17,7 @@ public static class NetConstants
     public const int MaxInputRedundancy = 3;
 
     public const int InputCommandBytes = 33;
-    public const int SnapshotStateBytes = 41;
+    public const int SnapshotStateBytes = 81;
     public const int FirePacketBytes = 29;
     public const int FireResultPacketBytes = 13;
 
