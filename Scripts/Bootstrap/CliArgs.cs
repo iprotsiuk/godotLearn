@@ -39,7 +39,7 @@ public sealed class CliArgs
     public float SimLossPercent { get; private set; }
 
     public int SimSeed { get; private set; } = 1337;
-    public NetworkProfile Profile { get; private set; } = NetworkProfile.Default;
+    public NetworkProfile Profile { get; private set; } = NetworkProfile.Wan;
     public bool LogControlPackets { get; private set; }
 
     public static CliArgs Parse(string[] args)

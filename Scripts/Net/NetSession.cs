@@ -105,6 +105,9 @@ public partial class NetSession : Node
     private float _jitterMs;
     private bool _logControlPackets;
     private float _dynamicInterpolationDelayMs;
+    private float _sessionSnapshotJitterEwmaMs;
+    private double _lastSnapshotArrivalTimeSec;
+    private bool _hasSnapshotArrivalTimeSec;
     private ushort _pingSeq;
     private double _nextPingTimeSec;
     private readonly Dictionary<ushort, double> _pingSent = new();
@@ -362,6 +365,9 @@ public partial class NetSession : Node
         _rttMs = 0.0f;
         _jitterMs = 0.0f;
         _dynamicInterpolationDelayMs = 0.0f;
+        _sessionSnapshotJitterEwmaMs = 0.0f;
+        _lastSnapshotArrivalTimeSec = 0.0;
+        _hasSnapshotArrivalTimeSec = false;
         _pingSeq = 0;
         _nextPingTimeSec = 0.0;
         _nextServerDiagnosticsLogAtSec = 0.0;

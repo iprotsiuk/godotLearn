@@ -7,8 +7,9 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
-    private const float DynamicInterpJitterScale = 2.0f;
-    private const float DynamicInterpMaxExtraMs = 100.0f;
+    private const float GlobalInterpJitterScale = 1.0f;
+    private const float GlobalInterpMaxExtraMs = 100.0f;
+    private const float SessionJitterEwmaAlpha = 0.1f;
 
     private void ClientConnectedToServer()
     {
@@ -190,6 +191,8 @@ public partial class NetSession
         _netClock?.ObserveServerTick(serverTick, localNowSec, _rttMs);
         _serverTick = serverTick;
 
+        UpdateSessionSnapshotJitter(localNowSec);
+
         double snapshotServerTime = serverTick / (double)_config.ServerTickRate;
         for (int i = 0; i < count; i++)
         {
@@ -305,25 +308,19 @@ public partial class NetSession
         }
 
         double nowSec = Time.GetTicksMsec() / 1000.0;
-        double estimatedServerTime = _netClock.GetEstimatedServerTime(nowSec);
+        double estimatedServerTimeNow = _netClock.GetEstimatedServerTime(nowSec);
         double maxExtrap = _config.MaxExtrapolationMs / 1000.0;
         float baseDelayMs = Mathf.Max(0.0f, _config.InterpolationDelayMs);
-        float largestDynamicDelayMs = baseDelayMs;
+        float extraDelayMs = Mathf.Clamp(
+            GlobalInterpJitterScale * _sessionSnapshotJitterEwmaMs,
+            0.0f,
+            GlobalInterpMaxExtraMs);
+        float globalInterpDelayMs = baseDelayMs + extraDelayMs;
+        double renderTime = estimatedServerTimeNow - (globalInterpDelayMs / 1000.0);
 
         foreach (KeyValuePair<int, RemoteEntity> pair in _remotePlayers)
         {
             RemoteEntity remote = pair.Value;
-            float extraDelayMs = Mathf.Clamp(
-                DynamicInterpJitterScale * remote.Buffer.ArrivalJitterEwmaMs,
-                0.0f,
-                DynamicInterpMaxExtraMs);
-            float dynamicInterpDelayMs = baseDelayMs + extraDelayMs;
-            if (dynamicInterpDelayMs > largestDynamicDelayMs)
-            {
-                largestDynamicDelayMs = dynamicInterpDelayMs;
-            }
-
-            double renderTime = estimatedServerTime - (dynamicInterpDelayMs / 1000.0);
             if (!remote.Buffer.TrySample(renderTime, maxExtrap, _config.UseHermiteInterpolation, out RemoteSample sample))
             {
                 continue;
@@ -334,7 +331,24 @@ public partial class NetSession
             remote.Character.SetLook(sample.Yaw, sample.Pitch);
         }
 
-        _dynamicInterpolationDelayMs = largestDynamicDelayMs;
+        _dynamicInterpolationDelayMs = globalInterpDelayMs;
+    }
+
+    private void UpdateSessionSnapshotJitter(double arrivalNowSec)
+    {
+        if (_hasSnapshotArrivalTimeSec)
+        {
+            double arrivalDeltaSec = arrivalNowSec - _lastSnapshotArrivalTimeSec;
+            double expectedDeltaSec = 1.0 / Mathf.Max(1, _config.SnapshotRate);
+            float jitterSampleMs = Mathf.Abs((float)((arrivalDeltaSec - expectedDeltaSec) * 1000.0));
+            _sessionSnapshotJitterEwmaMs = Mathf.Lerp(
+                _sessionSnapshotJitterEwmaMs,
+                jitterSampleMs,
+                SessionJitterEwmaAlpha);
+        }
+
+        _lastSnapshotArrivalTimeSec = arrivalNowSec;
+        _hasSnapshotArrivalTimeSec = true;
     }
 
 }

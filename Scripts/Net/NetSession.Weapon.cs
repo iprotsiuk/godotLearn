@@ -40,21 +40,17 @@ public partial class NetSession
 		}
 
 		Vector3 origin = _localCharacter.LocalCamera?.GlobalPosition ?? (_localCharacter.GlobalPosition + new Vector3(0.0f, 1.55f, 0.0f));
-		Vector3 direction = YawPitchToDirection(_lookYaw, _lookPitch).Normalized();
-		SpawnLocalProjectile(origin, direction, _localCharacter.Velocity);
 
+		float globalInterpDelayMs = GetGlobalInterpolationDelayMs();
 		FireRequest request = new()
 		{
-			EstimatedServerTickAtFire = EstimateServerTickAtFire(),
+			EstimatedServerTickAtFire = EstimateServerTickAtFire(globalInterpDelayMs),
 			InputEpoch = _inputEpoch,
 			Origin = origin,
 			Yaw = _lookYaw,
 			Pitch = _lookPitch
 		};
-		float fireDelayMs = _dynamicInterpolationDelayMs > 0.01f
-			? _dynamicInterpolationDelayMs
-			: Mathf.Max(0.0f, _config.InterpolationDelayMs);
-		GD.Print($"FireRequest: peer={_localPeerId} estTick={request.EstimatedServerTickAtFire} delayMs={fireDelayMs:0.0} epoch={request.InputEpoch}");
+		GD.Print($"FireRequest: peer={_localPeerId} estTick={request.EstimatedServerTickAtFire} delayMs={globalInterpDelayMs:0.0} epoch={request.InputEpoch}");
 
 		NetCodec.WriteFire(_firePacket, request);
 		if (_mode == RunMode.ListenServer)
@@ -67,25 +63,29 @@ public partial class NetSession
 		}
 	}
 
-	private uint EstimateServerTickAtFire()
+	private uint EstimateServerTickAtFire(float globalInterpDelayMs)
 	{
 		double nowSec = Time.GetTicksMsec() / 1000.0;
 		double estimatedServerTimeNow = (_netClock is not null && _netClock.LastServerTick > 0)
 			? _netClock.GetEstimatedServerTime(nowSec)
 			: (_serverTick / (double)Mathf.Max(1, _config.ServerTickRate));
 
-		float delayMs = _dynamicInterpolationDelayMs > 0.01f
-			? _dynamicInterpolationDelayMs
-			: Mathf.Max(0.0f, _config.InterpolationDelayMs);
-		double delaySec = delayMs / 1000.0;
+		double delaySec = globalInterpDelayMs / 1000.0;
 		double viewServerTime = estimatedServerTimeNow - delaySec;
-		double tickAsDouble = Mathf.FloorToInt((float)(viewServerTime * _config.ServerTickRate));
-		if (tickAsDouble <= 0.0)
+		double rawViewTick = viewServerTime * _config.ServerTickRate;
+		if (rawViewTick <= 0.0)
 		{
 			return 0;
 		}
 
-		return (uint)tickAsDouble;
+		return (uint)Mathf.FloorToInt((float)rawViewTick);
+	}
+
+	private float GetGlobalInterpolationDelayMs()
+	{
+		return _dynamicInterpolationDelayMs > 0.01f
+			? _dynamicInterpolationDelayMs
+			: Mathf.Max(0.0f, _config.InterpolationDelayMs);
 	}
 
 	private void HandleFire(int fromPeer, byte[] packet)
@@ -165,7 +165,10 @@ public partial class NetSession
 		FireVisual visual = new()
 		{
 			ShooterPeerId = fromPeer,
+			ValidatedServerTick = rewindTick,
 			Origin = origin,
+			Yaw = request.Yaw,
+			Pitch = request.Pitch,
 			HitPoint = hitPoint,
 			DidHit = hitPeer >= 0
 		};
@@ -232,12 +235,17 @@ public partial class NetSession
 			return;
 		}
 
-		if (visual.ShooterPeerId == _localPeerId && _localPeerId != 0)
+		Vector3 direction = YawPitchToDirection(visual.Yaw, visual.Pitch);
+		if (direction.LengthSquared() <= 0.000001f)
 		{
 			return;
 		}
 
-		SpawnRemoteProjectile(visual.Origin, visual.HitPoint);
+		direction = direction.Normalized();
+		Vector3 targetPoint = visual.DidHit
+			? visual.HitPoint
+			: visual.Origin + (direction * WeaponMaxRange);
+		SpawnRemoteProjectile(visual.Origin, targetPoint);
 	}
 
 	private void BroadcastFireVisual(byte[] packet)
@@ -250,7 +258,7 @@ public partial class NetSession
 				continue;
 			}
 
-			SendPacket(targetPeer, NetChannels.Snapshot, MultiplayerPeer.TransferModeEnum.UnreliableOrdered, packet);
+			SendPacket(targetPeer, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, packet);
 		}
 	}
 

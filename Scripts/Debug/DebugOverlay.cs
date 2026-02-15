@@ -128,6 +128,9 @@ public partial class DebugOverlay : CanvasLayer
         string interpDelayText = metrics.DynamicInterpolationDelayMs < 0.0f
             ? "N/A"
             : $"{metrics.DynamicInterpolationDelayMs:0.0} ms";
+        string sessionJitterText = metrics.SessionJitterEstimateMs < 0.0f
+            ? "N/A"
+            : $"{metrics.SessionJitterEstimateMs:0.0} ms";
         string serverPeerRttText = metrics.ServerPeerRttMs < 0.0f ? "N/A" : $"{metrics.ServerPeerRttMs:0.0} ms";
         string serverPeerJitterText = metrics.ServerPeerJitterMs < 0.0f ? "N/A" : $"{metrics.ServerPeerJitterMs:0.0} ms";
         uint serverUsageTotal = metrics.ServerTicksUsedBufferedInput + metrics.ServerTicksUsedHoldLast + metrics.ServerTicksUsedNeutral;
@@ -141,7 +144,8 @@ public partial class DebugOverlay : CanvasLayer
             $"\nClient Tick: {metrics.ClientTick}" +
             $"\nRTT: {rttText}" +
             $"\nJitter: {jitterText}" +
-            $"\nDynamic Interp Delay: {interpDelayText}" +
+            $"\nGlobal Interp Delay: {interpDelayText}" +
+            $"\nSession Jitter Estimate: {sessionJitterText}" +
             $"\nLast Acked Seq: {metrics.LastAckedInput}" +
             $"\nPending Inputs Count: {metrics.PendingInputCount}" +
             $"\nJump Repeat Left: {metrics.JumpRepeatRemaining}" +

@@ -72,9 +72,12 @@ public struct FireResult
 public struct FireVisual
 {
     public int ShooterPeerId;
+    public uint ValidatedServerTick;
     public Vector3 Origin;
-    public Vector3 HitPoint;
+    public float Yaw;
+    public float Pitch;
     public bool DidHit;
+    public Vector3 HitPoint;
 }
 
 public struct SessionMetrics
@@ -99,6 +102,7 @@ public struct SessionMetrics
     public int SimJitterMs;
     public float SimLossPercent;
     public float DynamicInterpolationDelayMs;
+    public float SessionJitterEstimateMs;
     public uint ServerDroppedOldInputCount;
     public uint ServerDroppedFutureInputCount;
     public uint ServerTicksUsedBufferedInput;

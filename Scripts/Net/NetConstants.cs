@@ -20,7 +20,7 @@ public static class NetConstants
     public const int SnapshotStateBytes = 81;
     public const int FirePacketBytes = 29;
     public const int FireResultPacketBytes = 13;
-    public const int FireVisualPacketBytes = 30;
+    public const int FireVisualPacketBytes = 42;
 
     public const int InputPacketBytes = 2 + (InputCommandBytes * MaxInputRedundancy);
     public const int SnapshotPacketBytes = 6 + (SnapshotStateBytes * MaxPlayers);

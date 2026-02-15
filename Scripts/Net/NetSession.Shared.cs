@@ -197,6 +197,7 @@ public partial class NetSession
             jitterMs = -1.0f;
         }
         float dynamicInterpDelayMs = IsClient ? _dynamicInterpolationDelayMs : -1.0f;
+        float sessionSnapshotJitterMs = IsClient ? _sessionSnapshotJitterEwmaMs : -1.0f;
         uint serverDroppedOldInputCount = _serverDroppedOldInputCount;
         uint serverDroppedFutureInputCount = _serverDroppedFutureInputCount;
         uint serverTicksUsedBufferedInput = _serverTicksUsedBufferedInput;
@@ -249,6 +250,7 @@ public partial class NetSession
             SimJitterMs = _simJitter,
             SimLossPercent = _simLoss,
             DynamicInterpolationDelayMs = dynamicInterpDelayMs,
+            SessionJitterEstimateMs = sessionSnapshotJitterMs,
             ServerDroppedOldInputCount = serverDroppedOldInputCount,
             ServerDroppedFutureInputCount = serverDroppedFutureInputCount,
             ServerTicksUsedBufferedInput = serverTicksUsedBufferedInput,

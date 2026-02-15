@@ -24,7 +24,7 @@ public partial class Main : Node
     private string _pendingJoinIp = "127.0.0.1";
     private int _pendingJoinPort = 7777;
     private int _simSeed = 1337;
-    private string _activeProfile = "DEFAULT";
+    private string _activeProfile = "WAN";
     public override void _Ready()
     {
         InputBootstrap.EnsureActions();
