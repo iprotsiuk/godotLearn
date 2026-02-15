@@ -206,6 +206,8 @@ public partial class PlayerCharacter : CharacterBody3D
 
 	public void AddViewCorrection(Vector3 offset, int smoothMs)
 	{
+		offset.X = 0.0f;
+		offset.Z = 0.0f;
 		_viewOffset += offset;
 		_viewOffset = ClampMagnitude(_viewOffset, MaxQueuedCorrection);
 		_viewSmoothSec = Mathf.Max(MinSmoothSec, smoothMs / 1000.0f);

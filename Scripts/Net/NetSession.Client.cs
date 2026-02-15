@@ -256,10 +256,28 @@ public partial class NetSession
         _lastCorrectionXZMeters = corrXZ;
         _lastCorrectionYMeters = corrY;
         _lastCorrection3DMeters = corr3D;
-        _lastCorrectionMeters = corrXZ;
+        _lastCorrectionMeters = corr3D;
 
-        _localCharacter.AddRenderCorrection(correctionDelta, _config.ReconciliationSmoothMs);
-        _localCharacter.AddViewCorrection(correctionDelta, _config.ReconciliationSmoothMs);
+        Vector3 renderOffset = new(correctionDelta.X, 0.0f, correctionDelta.Z);
+        if (corrXZ > _config.ReconciliationSnapThreshold)
+        {
+            _localCharacter.ClearRenderCorrection();
+        }
+        else
+        {
+            _localCharacter.AddRenderCorrection(renderOffset, _config.ReconciliationSmoothMs);
+        }
+
+        Vector3 viewOffset = new(0.0f, correctionDelta.Y, 0.0f);
+        if (corrY > 0.5f)
+        {
+            _localCharacter.ClearViewCorrection();
+        }
+        else
+        {
+            int viewSmoothMs = Mathf.Min(40, _config.ReconciliationSmoothMs);
+            _localCharacter.AddViewCorrection(viewOffset, viewSmoothMs);
+        }
     }
 
     private void UpdateRemoteInterpolation()
