@@ -69,6 +69,14 @@ public struct FireResult
     public uint ValidatedServerTick;
 }
 
+public struct FireVisual
+{
+    public int ShooterPeerId;
+    public Vector3 Origin;
+    public Vector3 HitPoint;
+    public bool DidHit;
+}
+
 public struct SessionMetrics
 {
     public uint ServerTick;

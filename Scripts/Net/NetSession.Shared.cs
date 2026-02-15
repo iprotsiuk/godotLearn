@@ -37,6 +37,9 @@ public partial class NetSession
             case PacketType.FireResult:
                 HandleFireResult(packet);
                 break;
+            case PacketType.FireVisual:
+                HandleFireVisual(packet);
+                break;
             default:
                 if (IsServer)
                 {
@@ -126,9 +129,9 @@ public partial class NetSession
 
         character.Setup(peerId, localCamera, TintForPeer(peerId, localCamera));
         character.Visible = visible;
+        _playerRoot.AddChild(character);
         character.GlobalPosition = SpawnPointForPeer(peerId);
         character.SetLook(SpawnYawForPeer(), 0.0f);
-        _playerRoot.AddChild(character);
         return character;
     }
 

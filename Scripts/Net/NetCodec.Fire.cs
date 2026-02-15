@@ -56,4 +56,30 @@ public static partial class NetCodec
         result.ValidatedServerTick = ReadUInt(packet, 9);
         return true;
     }
+
+    public static void WriteFireVisual(byte[] packet, in FireVisual visual)
+    {
+        packet[0] = (byte)PacketType.FireVisual;
+        WriteInt(packet, 1, visual.ShooterPeerId);
+        int offset = 5;
+        WriteVector3(packet, ref offset, visual.Origin);
+        WriteVector3(packet, ref offset, visual.HitPoint);
+        packet[offset] = visual.DidHit ? (byte)1 : (byte)0;
+    }
+
+    public static bool TryReadFireVisual(ReadOnlySpan<byte> packet, out FireVisual visual)
+    {
+        visual = default;
+        if (packet.Length < NetConstants.FireVisualPacketBytes || packet[0] != (byte)PacketType.FireVisual)
+        {
+            return false;
+        }
+
+        visual.ShooterPeerId = ReadInt(packet, 1);
+        int offset = 5;
+        visual.Origin = ReadVector3(packet, ref offset);
+        visual.HitPoint = ReadVector3(packet, ref offset);
+        visual.DidHit = packet[offset] != 0;
+        return true;
+    }
 }

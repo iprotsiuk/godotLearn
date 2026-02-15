@@ -10,6 +10,7 @@ public partial class NetSession
 	private const float VisualProjectileSpeed = 75.0f;
 	private const double VisualProjectileLifetimeSec = 0.75;
 	private const double HitIndicatorDurationSec = 0.12;
+	private const double DamageFlashDurationSec = 0.15;
 
 	private sealed class VisualProjectile
 	{
@@ -23,6 +24,8 @@ public partial class NetSession
 	private CanvasLayer? _hitIndicatorLayer;
 	private ColorRect? _hitIndicatorRect;
 	private double _hitIndicatorExpireAtSec;
+	private ColorRect? _damageIndicatorRect;
+	private double _damageIndicatorExpireAtSec;
 
 	private void TryFireWeapon()
 	{
@@ -159,6 +162,15 @@ public partial class NetSession
 		}
 		NetCodec.WriteFireResult(_fireResultPacket, result);
 		BroadcastFireResult(_fireResultPacket);
+		FireVisual visual = new()
+		{
+			ShooterPeerId = fromPeer,
+			Origin = origin,
+			HitPoint = hitPoint,
+			DidHit = hitPeer >= 0
+		};
+		NetCodec.WriteFireVisual(_fireVisualPacket, visual);
+		BroadcastFireVisual(_fireVisualPacket);
 		DrawDebugShot(origin, hitPoint, hitPeer >= 0);
 	}
 
@@ -187,6 +199,11 @@ public partial class NetSession
 		{
 			ShowHitIndicator(result.HitPeerId >= 0);
 		}
+
+		if (result.HitPeerId == _localPeerId && result.ShooterPeerId != _localPeerId)
+		{
+			ShowDamageIndicator();
+		}
 	}
 
 	private void BroadcastFireResult(byte[] packet)
@@ -200,6 +217,40 @@ public partial class NetSession
 			}
 
 			SendPacket(targetPeer, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, packet);
+		}
+	}
+
+	private void HandleFireVisual(byte[] packet)
+	{
+		if (!IsClient)
+		{
+			return;
+		}
+
+		if (!NetCodec.TryReadFireVisual(packet, out FireVisual visual))
+		{
+			return;
+		}
+
+		if (visual.ShooterPeerId == _localPeerId && _localPeerId != 0)
+		{
+			return;
+		}
+
+		SpawnRemoteProjectile(visual.Origin, visual.HitPoint);
+	}
+
+	private void BroadcastFireVisual(byte[] packet)
+	{
+		foreach (int targetPeer in _serverPlayers.Keys)
+		{
+			if (_mode == RunMode.ListenServer && targetPeer == _localPeerId)
+			{
+				HandleFireVisual(packet);
+				continue;
+			}
+
+			SendPacket(targetPeer, NetChannels.Snapshot, MultiplayerPeer.TransferModeEnum.UnreliableOrdered, packet);
 		}
 	}
 
@@ -413,6 +464,7 @@ public partial class NetSession
 	{
 		UpdateProjectileVisuals(nowSec);
 		UpdateHitIndicator(nowSec);
+		UpdateDamageIndicator(nowSec);
 
 		for (int i = 0; i < _debugDrawNodes.Count;)
 		{
@@ -446,8 +498,7 @@ public partial class NetSession
 		MeshInstance3D projectile = new()
 		{
 			Mesh = new SphereMesh { Radius = 0.05f, Height = 0.1f },
-			TopLevel = true,
-			GlobalPosition = origin
+			TopLevel = true
 		};
 		projectile.MaterialOverride = new StandardMaterial3D
 		{
@@ -456,11 +507,43 @@ public partial class NetSession
 		};
 
 		AddChild(projectile);
+		projectile.GlobalPosition = origin;
 		double nowSec = Time.GetTicksMsec() / 1000.0;
 		_visualProjectiles.Add(new VisualProjectile
 		{
 			Node = projectile,
 			Velocity = (direction * VisualProjectileSpeed) + shooterVelocity,
+			ExpireAtSec = nowSec + VisualProjectileLifetimeSec
+		});
+	}
+
+	private void SpawnRemoteProjectile(Vector3 origin, Vector3 hitPoint)
+	{
+		Vector3 direction = hitPoint - origin;
+		if (direction.LengthSquared() <= 0.000001f)
+		{
+			return;
+		}
+
+		direction = direction.Normalized();
+		MeshInstance3D projectile = new()
+		{
+			Mesh = new SphereMesh { Radius = 0.05f, Height = 0.1f },
+			TopLevel = true
+		};
+		projectile.MaterialOverride = new StandardMaterial3D
+		{
+			ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+			AlbedoColor = new Color(1.0f, 0.65f, 0.2f)
+		};
+
+		AddChild(projectile);
+		projectile.GlobalPosition = origin + (direction * 0.25f);
+		double nowSec = Time.GetTicksMsec() / 1000.0;
+		_visualProjectiles.Add(new VisualProjectile
+		{
+			Node = projectile,
+			Velocity = direction * VisualProjectileSpeed,
 			ExpireAtSec = nowSec + VisualProjectileLifetimeSec
 		});
 	}
@@ -537,6 +620,22 @@ public partial class NetSession
 			MouseFilter = Control.MouseFilterEnum.Ignore
 		};
 		_hitIndicatorLayer.AddChild(_hitIndicatorRect);
+
+		_damageIndicatorRect = new ColorRect
+		{
+			AnchorLeft = 0.0f,
+			AnchorTop = 0.0f,
+			AnchorRight = 1.0f,
+			AnchorBottom = 1.0f,
+			OffsetLeft = 0.0f,
+			OffsetTop = 0.0f,
+			OffsetRight = 0.0f,
+			OffsetBottom = 0.0f,
+			Color = new Color(1.0f, 0.12f, 0.12f, 0.0f),
+			Visible = false,
+			MouseFilter = Control.MouseFilterEnum.Ignore
+		};
+		_hitIndicatorLayer.AddChild(_damageIndicatorRect);
 	}
 
 	private void ShowHitIndicator(bool hit)
@@ -569,6 +668,34 @@ public partial class NetSession
 		_hitIndicatorRect.Visible = false;
 	}
 
+	private void ShowDamageIndicator()
+	{
+		EnsureHitIndicator();
+		if (_damageIndicatorRect is null)
+		{
+			return;
+		}
+
+		_damageIndicatorRect.Color = new Color(1.0f, 0.12f, 0.12f, 0.22f);
+		_damageIndicatorRect.Visible = true;
+		_damageIndicatorExpireAtSec = (Time.GetTicksMsec() / 1000.0) + DamageFlashDurationSec;
+	}
+
+	private void UpdateDamageIndicator(double nowSec)
+	{
+		if (_damageIndicatorRect is null || !_damageIndicatorRect.Visible)
+		{
+			return;
+		}
+
+		if (nowSec < _damageIndicatorExpireAtSec)
+		{
+			return;
+		}
+
+		_damageIndicatorRect.Visible = false;
+	}
+
 	private void ClearHitIndicator()
 	{
 		if (_hitIndicatorRect is not null && GodotObject.IsInstanceValid(_hitIndicatorRect))
@@ -582,8 +709,10 @@ public partial class NetSession
 		}
 
 		_hitIndicatorRect = null;
+		_damageIndicatorRect = null;
 		_hitIndicatorLayer = null;
 		_hitIndicatorExpireAtSec = 0.0;
+		_damageIndicatorExpireAtSec = 0.0;
 	}
 
 	private void DrawDebugShot(Vector3 start, Vector3 end, bool didHit)
@@ -613,8 +742,7 @@ public partial class NetSession
 			MeshInstance3D marker = new()
 			{
 				Mesh = new SphereMesh { Radius = 0.08f, Height = 0.16f },
-				TopLevel = true,
-				GlobalPosition = end
+				TopLevel = true
 			};
 			marker.MaterialOverride = new StandardMaterial3D
 			{
@@ -622,6 +750,7 @@ public partial class NetSession
 				AlbedoColor = new Color(1.0f, 0.15f, 0.15f)
 			};
 			AddChild(marker);
+			marker.GlobalPosition = end;
 			_debugDrawNodes.Add((marker, (Time.GetTicksMsec() / 1000.0) + 0.2));
 		}
 #endif

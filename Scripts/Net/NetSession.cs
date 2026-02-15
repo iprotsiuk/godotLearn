@@ -62,6 +62,7 @@ public partial class NetSession : Node
     private readonly RewindSample[,] _rewindSamples = new RewindSample[RewindHistoryTicks, NetConstants.MaxPlayers];
     private readonly byte[] _firePacket = new byte[NetConstants.FirePacketBytes];
     private readonly byte[] _fireResultPacket = new byte[NetConstants.FireResultPacketBytes];
+    private readonly byte[] _fireVisualPacket = new byte[NetConstants.FireVisualPacketBytes];
     private readonly List<(PlayerCharacter Character, Vector3 Position)> _rewindRestoreScratch = new(NetConstants.MaxPlayers);
     private readonly List<(Node3D Node, double ExpireAt)> _debugDrawNodes = new(32);
 
