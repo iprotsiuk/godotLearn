@@ -125,6 +125,9 @@ public partial class DebugOverlay : CanvasLayer
 
         string rttText = metrics.RttMs < 0.0f ? "N/A" : $"{metrics.RttMs:0.0} ms";
         string jitterText = metrics.JitterMs < 0.0f ? "N/A" : $"{metrics.JitterMs:0.0} ms";
+        string interpDelayText = metrics.DynamicInterpolationDelayMs < 0.0f
+            ? "N/A"
+            : $"{metrics.DynamicInterpolationDelayMs:0.0} ms";
 
         _statsLabel.Text =
             $"Role: {(isServer ? "Server" : "")}{(isServer && isClient ? "/" : "")}{(isClient ? "Client" : "")}" +
@@ -132,6 +135,7 @@ public partial class DebugOverlay : CanvasLayer
             $"\nClient Tick: {metrics.ClientTick}" +
             $"\nRTT: {rttText}" +
             $"\nJitter: {jitterText}" +
+            $"\nInterp Delay: {interpDelayText}" +
             $"\nLast Acked Input: {metrics.LastAckedInput}" +
             $"\nPending Inputs: {metrics.PendingInputCount}" +
             $"\nJump Repeat Left: {metrics.JumpRepeatRemaining}" +

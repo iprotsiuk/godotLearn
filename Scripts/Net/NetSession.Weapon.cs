@@ -7,6 +7,23 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+	private const float VisualProjectileSpeed = 75.0f;
+	private const double VisualProjectileLifetimeSec = 0.75;
+	private const double HitIndicatorDurationSec = 0.12;
+
+	private sealed class VisualProjectile
+	{
+		public required MeshInstance3D Node;
+		public Vector3 Velocity;
+		public double ExpireAtSec;
+	}
+
+	private readonly List<VisualProjectile> _visualProjectiles = new(32);
+	private double _lastProjectileUpdateSec = -1.0;
+	private CanvasLayer? _hitIndicatorLayer;
+	private ColorRect? _hitIndicatorRect;
+	private double _hitIndicatorExpireAtSec;
+
 	private void TryFireWeapon()
 	{
 		if (!IsClient || _localCharacter is null)
@@ -20,6 +37,9 @@ public partial class NetSession
 		}
 
 		Vector3 origin = _localCharacter.LocalCamera?.GlobalPosition ?? (_localCharacter.GlobalPosition + new Vector3(0.0f, 1.55f, 0.0f));
+		Vector3 direction = YawPitchToDirection(_lookYaw, _lookPitch).Normalized();
+		SpawnLocalProjectile(origin, direction);
+
 		FireRequest request = new()
 		{
 			EstimatedServerTickAtFire = EstimateServerTickAtFire(),
@@ -28,6 +48,7 @@ public partial class NetSession
 			Yaw = _lookYaw,
 			Pitch = _lookPitch
 		};
+		GD.Print($"FireRequest: peer={_localPeerId} estTick={request.EstimatedServerTickAtFire} epoch={request.InputEpoch}");
 
 		NetCodec.WriteFire(_firePacket, request);
 		if (_mode == RunMode.ListenServer)
@@ -36,7 +57,7 @@ public partial class NetSession
 		}
 		else
 		{
-			SendPacket(1, NetChannels.Input, MultiplayerPeer.TransferModeEnum.Unreliable, _firePacket);
+			SendPacket(1, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _firePacket);
 		}
 	}
 
@@ -70,18 +91,27 @@ public partial class NetSession
 			return;
 		}
 
+		GD.Print($"FireRecv: fromPeer={fromPeer} bytes={packet.Length} serverTick={_serverTick}");
+
 		if (!_serverPlayers.TryGetValue(fromPeer, out ServerPlayer? shooter))
 		{
-			return;
+			ServerPeerConnected(fromPeer);
+			if (!_serverPlayers.TryGetValue(fromPeer, out shooter))
+			{
+				GD.Print($"FireReject: no server player for peer={fromPeer}");
+				return;
+			}
 		}
 
 		if (!NetCodec.TryReadFire(packet, out FireRequest request))
 		{
+			GD.Print($"FireReject: decode failed for peer={fromPeer}");
 			return;
 		}
 
 		if (request.InputEpoch != shooter.CurrentInputEpoch)
 		{
+			GD.Print($"FireReject: epoch mismatch peer={fromPeer} reqEpoch={request.InputEpoch} curEpoch={shooter.CurrentInputEpoch}");
 			return;
 		}
 
@@ -118,6 +148,14 @@ public partial class NetSession
 			HitPeerId = hitPeer,
 			ValidatedServerTick = rewindTick
 		};
+		if (hitPeer >= 0)
+		{
+			GD.Print($"ServerHit: shooter={fromPeer} target={hitPeer} rewindTick={rewindTick}");
+		}
+		else
+		{
+			GD.Print($"ServerMiss: shooter={fromPeer} rewindTick={rewindTick}");
+		}
 		NetCodec.WriteFireResult(_fireResultPacket, result);
 		BroadcastFireResult(_fireResultPacket);
 		DrawDebugShot(origin, hitPoint, hitPeer >= 0);
@@ -142,6 +180,11 @@ public partial class NetSession
 		else
 		{
 			GD.Print($"FireResult: shooter={result.ShooterPeerId} miss tick={result.ValidatedServerTick}");
+		}
+
+		if (result.ShooterPeerId == _localPeerId && _localPeerId != 0)
+		{
+			ShowHitIndicator(result.HitPeerId >= 0);
 		}
 	}
 
@@ -367,6 +410,9 @@ public partial class NetSession
 
 	private void UpdateDebugDraws(double nowSec)
 	{
+		UpdateProjectileVisuals(nowSec);
+		UpdateHitIndicator(nowSec);
+
 		for (int i = 0; i < _debugDrawNodes.Count;)
 		{
 			(Node3D node, double expireAt) = _debugDrawNodes[i];
@@ -385,6 +431,156 @@ public partial class NetSession
 			_debugDrawNodes[i] = _debugDrawNodes[last];
 			_debugDrawNodes.RemoveAt(last);
 		}
+	}
+
+	private void SpawnLocalProjectile(Vector3 origin, Vector3 direction)
+	{
+		if (_mode == RunMode.None)
+		{
+			return;
+		}
+
+		MeshInstance3D projectile = new()
+		{
+			Mesh = new SphereMesh { Radius = 0.05f, Height = 0.1f },
+			TopLevel = true,
+			GlobalPosition = origin
+		};
+		projectile.MaterialOverride = new StandardMaterial3D
+		{
+			ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+			AlbedoColor = new Color(0.2f, 0.95f, 1.0f)
+		};
+
+		AddChild(projectile);
+		double nowSec = Time.GetTicksMsec() / 1000.0;
+		_visualProjectiles.Add(new VisualProjectile
+		{
+			Node = projectile,
+			Velocity = direction * VisualProjectileSpeed,
+			ExpireAtSec = nowSec + VisualProjectileLifetimeSec
+		});
+	}
+
+	private void UpdateProjectileVisuals(double nowSec)
+	{
+		if (_lastProjectileUpdateSec < 0.0)
+		{
+			_lastProjectileUpdateSec = nowSec;
+			return;
+		}
+
+		float dt = Mathf.Max(0.0f, (float)(nowSec - _lastProjectileUpdateSec));
+		_lastProjectileUpdateSec = nowSec;
+		for (int i = 0; i < _visualProjectiles.Count;)
+		{
+			VisualProjectile projectile = _visualProjectiles[i];
+			bool expired = projectile.ExpireAtSec <= nowSec || !GodotObject.IsInstanceValid(projectile.Node);
+			if (!expired)
+			{
+				projectile.Node.GlobalPosition += projectile.Velocity * dt;
+				_visualProjectiles[i] = projectile;
+				i++;
+				continue;
+			}
+
+			if (GodotObject.IsInstanceValid(projectile.Node))
+			{
+				projectile.Node.QueueFree();
+			}
+
+			int last = _visualProjectiles.Count - 1;
+			_visualProjectiles[i] = _visualProjectiles[last];
+			_visualProjectiles.RemoveAt(last);
+		}
+	}
+
+	private void ClearProjectileVisuals()
+	{
+		foreach (VisualProjectile projectile in _visualProjectiles)
+		{
+			if (GodotObject.IsInstanceValid(projectile.Node))
+			{
+				projectile.Node.QueueFree();
+			}
+		}
+
+		_visualProjectiles.Clear();
+		_lastProjectileUpdateSec = -1.0;
+	}
+
+	private void EnsureHitIndicator()
+	{
+		if (_hitIndicatorLayer is not null && GodotObject.IsInstanceValid(_hitIndicatorLayer))
+		{
+			return;
+		}
+
+		_hitIndicatorLayer = new CanvasLayer { Layer = 50 };
+		AddChild(_hitIndicatorLayer);
+
+		_hitIndicatorRect = new ColorRect
+		{
+			AnchorLeft = 0.5f,
+			AnchorTop = 0.5f,
+			AnchorRight = 0.5f,
+			AnchorBottom = 0.5f,
+			OffsetLeft = -6.0f,
+			OffsetTop = -6.0f,
+			OffsetRight = 6.0f,
+			OffsetBottom = 6.0f,
+			Color = new Color(0.2f, 1.0f, 0.2f, 0.0f),
+			Visible = false,
+			MouseFilter = Control.MouseFilterEnum.Ignore
+		};
+		_hitIndicatorLayer.AddChild(_hitIndicatorRect);
+	}
+
+	private void ShowHitIndicator(bool hit)
+	{
+		EnsureHitIndicator();
+		if (_hitIndicatorRect is null)
+		{
+			return;
+		}
+
+		_hitIndicatorRect.Color = hit
+			? new Color(0.2f, 1.0f, 0.2f, 0.95f)
+			: new Color(1.0f, 0.25f, 0.25f, 0.95f);
+		_hitIndicatorRect.Visible = true;
+		_hitIndicatorExpireAtSec = (Time.GetTicksMsec() / 1000.0) + HitIndicatorDurationSec;
+	}
+
+	private void UpdateHitIndicator(double nowSec)
+	{
+		if (_hitIndicatorRect is null || !_hitIndicatorRect.Visible)
+		{
+			return;
+		}
+
+		if (nowSec < _hitIndicatorExpireAtSec)
+		{
+			return;
+		}
+
+		_hitIndicatorRect.Visible = false;
+	}
+
+	private void ClearHitIndicator()
+	{
+		if (_hitIndicatorRect is not null && GodotObject.IsInstanceValid(_hitIndicatorRect))
+		{
+			_hitIndicatorRect.Visible = false;
+		}
+
+		if (_hitIndicatorLayer is not null && GodotObject.IsInstanceValid(_hitIndicatorLayer))
+		{
+			_hitIndicatorLayer.QueueFree();
+		}
+
+		_hitIndicatorRect = null;
+		_hitIndicatorLayer = null;
+		_hitIndicatorExpireAtSec = 0.0;
 	}
 
 	private void DrawDebugShot(Vector3 start, Vector3 end, bool didHit)

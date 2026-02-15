@@ -6,10 +6,18 @@ namespace NetRunnerSlice.Net;
 public sealed class RemoteSnapshotBuffer
 {
     private const int Capacity = 64;
+    private const float ArrivalIntervalEwmaAlpha = 0.1f;
+    private const float ArrivalJitterEwmaAlpha = 0.2f;
 
     private readonly double[] _times = new double[Capacity];
     private readonly RemoteSample[] _samples = new RemoteSample[Capacity];
     private int _count;
+    private bool _hasArrivalSample;
+    private double _lastArrivalSec;
+    private double _arrivalIntervalEwmaSec;
+    private float _arrivalJitterEwmaMs;
+
+    public float ArrivalJitterEwmaMs => _arrivalJitterEwmaMs;
 
     public void Add(double serverTime, in RemoteSample sample)
     {
@@ -57,6 +65,46 @@ public sealed class RemoteSnapshotBuffer
         _times[insertAt] = serverTime;
         _samples[insertAt] = sample;
         _count++;
+    }
+
+    public void ObserveArrival(double arrivalSec, double expectedDeltaSec)
+    {
+        if (!_hasArrivalSample)
+        {
+            _hasArrivalSample = true;
+            _lastArrivalSec = arrivalSec;
+            return;
+        }
+
+        double arrivalDeltaSec = arrivalSec - _lastArrivalSec;
+        _lastArrivalSec = arrivalSec;
+        if (arrivalDeltaSec <= 0.0)
+        {
+            return;
+        }
+
+        if (_arrivalIntervalEwmaSec <= 0.0)
+        {
+            _arrivalIntervalEwmaSec = arrivalDeltaSec;
+        }
+        else
+        {
+            _arrivalIntervalEwmaSec = Mathf.Lerp(
+                (float)_arrivalIntervalEwmaSec,
+                (float)arrivalDeltaSec,
+                ArrivalIntervalEwmaAlpha);
+        }
+
+        double expectedSec = expectedDeltaSec > 0.0 ? expectedDeltaSec : _arrivalIntervalEwmaSec;
+        float deltaFromExpectedMs = (float)(Mathf.Abs((float)(arrivalDeltaSec - expectedSec)) * 1000.0f);
+        if (_arrivalJitterEwmaMs <= 0.001f)
+        {
+            _arrivalJitterEwmaMs = deltaFromExpectedMs;
+        }
+        else
+        {
+            _arrivalJitterEwmaMs = Mathf.Lerp(_arrivalJitterEwmaMs, deltaFromExpectedMs, ArrivalJitterEwmaAlpha);
+        }
     }
 
     public bool TrySample(double renderTime, double maxExtrapolation, bool useHermiteInterpolation, out RemoteSample sampled)

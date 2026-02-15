@@ -7,7 +7,8 @@ public enum StartupRole
 {
     None,
     Host,
-    Join
+    Join,
+    Dedicated
 }
 
 public enum NetworkProfile
@@ -39,6 +40,7 @@ public sealed class CliArgs
 
     public int SimSeed { get; private set; } = 1337;
     public NetworkProfile Profile { get; private set; } = NetworkProfile.Default;
+    public bool LogControlPackets { get; private set; }
 
     public static CliArgs Parse(string[] args)
     {
@@ -63,8 +65,15 @@ public sealed class CliArgs
                         "host" => StartupRole.Host,
                         "client" => StartupRole.Join,
                         "join" => StartupRole.Join,
+                        "dedicated" => StartupRole.Dedicated,
                         _ => StartupRole.None
                     };
+                    break;
+                case "dedicated":
+                    if (value == "1" || value.Equals("true", System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        parsed.Role = StartupRole.Dedicated;
+                    }
                     break;
                 case "ip":
                     if (!string.IsNullOrWhiteSpace(value))
@@ -118,6 +127,9 @@ public sealed class CliArgs
                         "wan" => NetworkProfile.Wan,
                         _ => NetworkProfile.Default
                     };
+                    break;
+                case "log-control-packets":
+                    parsed.LogControlPackets = value != "0";
                     break;
             }
         }

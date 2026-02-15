@@ -80,4 +80,5 @@ public struct SessionMetrics
     public int SimLatencyMs;
     public int SimJitterMs;
     public float SimLossPercent;
+    public float DynamicInterpolationDelayMs;
 }

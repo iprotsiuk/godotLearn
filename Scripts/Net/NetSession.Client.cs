@@ -7,6 +7,9 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private const float DynamicInterpJitterScale = 2.0f;
+    private const float DynamicInterpMaxExtraMs = 100.0f;
+
     private void ClientConnectedToServer()
     {
         if (_mode != RunMode.Client)
@@ -204,6 +207,9 @@ public partial class NetSession
                 _remotePlayers[state.PeerId] = remote;
             }
 
+            double expectedArrivalDeltaSec = 1.0 / Mathf.Max(1, _config.SnapshotRate);
+            remote.Buffer.ObserveArrival(localNowSec, expectedArrivalDeltaSec);
+
             RemoteSample sample = new()
             {
                 Pos = state.Pos,
@@ -288,12 +294,25 @@ public partial class NetSession
         }
 
         double nowSec = Time.GetTicksMsec() / 1000.0;
-        double renderTime = _netClock.GetEstimatedServerTime(nowSec) - (_config.InterpolationDelayMs / 1000.0);
+        double estimatedServerTime = _netClock.GetEstimatedServerTime(nowSec);
         double maxExtrap = _config.MaxExtrapolationMs / 1000.0;
+        float baseDelayMs = Mathf.Max(0.0f, _config.InterpolationDelayMs);
+        float largestDynamicDelayMs = baseDelayMs;
 
         foreach (KeyValuePair<int, RemoteEntity> pair in _remotePlayers)
         {
             RemoteEntity remote = pair.Value;
+            float extraDelayMs = Mathf.Clamp(
+                DynamicInterpJitterScale * remote.Buffer.ArrivalJitterEwmaMs,
+                0.0f,
+                DynamicInterpMaxExtraMs);
+            float dynamicInterpDelayMs = baseDelayMs + extraDelayMs;
+            if (dynamicInterpDelayMs > largestDynamicDelayMs)
+            {
+                largestDynamicDelayMs = dynamicInterpDelayMs;
+            }
+
+            double renderTime = estimatedServerTime - (dynamicInterpDelayMs / 1000.0);
             if (!remote.Buffer.TrySample(renderTime, maxExtrap, _config.UseHermiteInterpolation, out RemoteSample sample))
             {
                 continue;
@@ -303,6 +322,8 @@ public partial class NetSession
             remote.Character.Velocity = sample.Vel;
             remote.Character.SetLook(sample.Yaw, sample.Pitch);
         }
+
+        _dynamicInterpolationDelayMs = largestDynamicDelayMs;
     }
 
 }

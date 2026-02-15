@@ -15,6 +15,11 @@ public partial class NetSession
 
         int fromPeer = (int)fromPeerLong;
         PacketType packetType = (PacketType)packet[0];
+        if (IsServer && (packetType == PacketType.Fire || (_logControlPackets && packetType == PacketType.Control)))
+        {
+            GD.Print($"PktRecv: type={(byte)packetType} ({packetType}) from={fromPeer} len={packet.Length} serverTick={_serverTick}");
+        }
+
         switch (packetType)
         {
             case PacketType.InputBundle:
@@ -31,6 +36,12 @@ public partial class NetSession
                 break;
             case PacketType.FireResult:
                 HandleFireResult(packet);
+                break;
+            default:
+                if (IsServer)
+                {
+                    GD.Print($"PktRecvUnknown: typeByte={packet[0]} from={fromPeer} len={packet.Length}");
+                }
                 break;
         }
     }
@@ -182,6 +193,7 @@ public partial class NetSession
             rttMs = -1.0f;
             jitterMs = -1.0f;
         }
+        float dynamicInterpDelayMs = IsClient ? _dynamicInterpolationDelayMs : -1.0f;
 
         Metrics = new SessionMetrics
         {
@@ -203,7 +215,8 @@ public partial class NetSession
             NetworkSimulationEnabled = _simEnabled,
             SimLatencyMs = _simLatency,
             SimJitterMs = _simJitter,
-            SimLossPercent = _simLoss
+            SimLossPercent = _simLoss,
+            DynamicInterpolationDelayMs = dynamicInterpDelayMs
         };
     }
 }

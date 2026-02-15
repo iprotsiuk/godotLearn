@@ -34,7 +34,11 @@ public partial class Main : Node
             (_cli.Profile == NetworkProfile.Wan ? "res://Config/network_config_wan.json" : "res://Config/network_config.json");
         _activeProfile = _cli.Profile == NetworkProfile.Lan ? "LAN" : (_cli.Profile == NetworkProfile.Wan ? "WAN" : "DEFAULT");
         _config = NetworkConfigLoader.Load(configPath);
-        BuildUi();
+        bool dedicatedMode = _cli.Role == StartupRole.Dedicated;
+        if (!dedicatedMode)
+        {
+            BuildUi();
+        }
         EnsureSceneRoot();
         EnsureSession();
         HookMultiplayerSignals();
@@ -47,8 +51,14 @@ public partial class Main : Node
             case StartupRole.Join:
                 StartJoin(_cli.Ip, _cli.Port);
                 break;
+            case StartupRole.Dedicated:
+                StartDedicated(_cli.Port);
+                break;
             default:
-                ShowMenu("Ready");
+                if (!dedicatedMode)
+                {
+                    ShowMenu("Ready");
+                }
                 break;
         }
     }
@@ -89,6 +99,7 @@ public partial class Main : Node
             Name = "NetSession"
         };
         AddChild(_session);
+        _session.SetDebugLogging(_cli?.LogControlPackets ?? false);
         ApplySimFromCliAndConfig();
     }
     private void ApplySimFromCliAndConfig()
@@ -226,6 +237,25 @@ public partial class Main : Node
         }
         UnloadWorld();
         ShowMenu("Host start failed.");
+    }
+    private void StartDedicated(int port)
+    {
+        _joinPending = false;
+        _session?.StopSession();
+        UnloadWorld();
+        if (!LoadTestWorld() || !InitializeSessionForWorld() || _session is null || _config is null)
+        {
+            GD.PushError("Dedicated server failed to load world/session.");
+            return;
+        }
+        if (!_session.StartDedicatedServer(port))
+        {
+            UnloadWorld();
+            GD.PushError("Dedicated server failed to start.");
+            return;
+        }
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        GD.Print($"DEDICATED SERVER mode: port={port}, tickRate={_config.ServerTickRate}");
     }
     private void StartJoin(string ip, int port)
     {

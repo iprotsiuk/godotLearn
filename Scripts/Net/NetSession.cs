@@ -16,6 +16,7 @@ public partial class NetSession : Node
     {
         None,
         ListenServer,
+        DedicatedServer,
         Client
     }
 
@@ -94,6 +95,8 @@ public partial class NetSession : Node
     private float _lastCorrection3DMeters;
     private float _rttMs;
     private float _jitterMs;
+    private bool _logControlPackets;
+    private float _dynamicInterpolationDelayMs;
     private ushort _pingSeq;
     private double _nextPingTimeSec;
     private readonly Dictionary<ushort, double> _pingSent = new();
@@ -104,9 +107,14 @@ public partial class NetSession : Node
     private uint _lastAckedSeq;
     private uint _inputEpoch = 1;
     private PlayerCharacter? _localCharacter;
-    public bool IsServer => _mode == RunMode.ListenServer;
+    public bool IsServer => _mode == RunMode.ListenServer || _mode == RunMode.DedicatedServer;
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
     public SessionMetrics Metrics { get; private set; }
+
+    public void SetDebugLogging(bool logControlPackets)
+    {
+        _logControlPackets = logControlPackets;
+    }
     public void Initialize(NetworkConfig config, Node3D playerRoot)
     {
         _config = config;
@@ -194,7 +202,13 @@ public partial class NetSession : Node
         {
             return;
         }
-        CaptureInputState();
+
+        // Dedicated server runs authoritative simulation only and must not poll local gameplay input.
+        if (IsClient)
+        {
+            CaptureInputState();
+        }
+
         UpdateRemoteInterpolation();
         UpdateDebugDraws(Time.GetTicksMsec() / 1000.0);
         UpdateMetrics();
@@ -259,6 +273,27 @@ public partial class NetSession : Node
         return true;
     }
 
+    public bool StartDedicatedServer(int port)
+    {
+        StopSession();
+
+        ENetMultiplayerPeer peer = new();
+        Error err = peer.CreateServer(port, _config.MaxPlayers, NetChannels.Count);
+        if (err != Error.Ok)
+        {
+            GD.PushError($"CreateServer failed: {err}");
+            return false;
+        }
+
+        Multiplayer.MultiplayerPeer = peer;
+        _mode = RunMode.DedicatedServer;
+        _localPeerId = Multiplayer.GetUniqueId();
+        _simulator = new NetworkSimulator(_simSeed, SendPacketNow);
+        _simulator.Configure(_simEnabled, _simLatency, _simJitter, _simLoss);
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        return true;
+    }
+
     public bool StartClient(string ip, int port)
     {
         StopSession();
@@ -307,11 +342,14 @@ public partial class NetSession : Node
         _lastCorrection3DMeters = 0.0f;
         _rttMs = 0.0f;
         _jitterMs = 0.0f;
+        _dynamicInterpolationDelayMs = 0.0f;
         _pingSeq = 0;
         _nextPingTimeSec = 0.0;
         _jumpPressRepeatTicksRemaining = 0;
         _inputState = default;
         _pendingInputs = new InputHistoryBuffer();
+        ClearProjectileVisuals();
+        ClearHitIndicator();
         foreach ((Node3D node, _) in _debugDrawNodes)
         {
             if (GodotObject.IsInstanceValid(node))
