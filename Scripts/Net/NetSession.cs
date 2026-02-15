@@ -70,7 +70,7 @@ public partial class NetSession : Node
     private ushort _pingSeq;
     private double _nextPingTimeSec;
     private readonly Dictionary<ushort, double> _pingSent = new();
-    private bool _inputDelayClampWarned;
+    private bool _inputDelayClampWarned, _hasFocus = true;
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
     private uint _lastAckedSeq;
@@ -172,7 +172,7 @@ public partial class NetSession : Node
 
     public override void _UnhandledInput(InputEvent @event)
     {
-        if (_localCharacter is null)
+        if (_localCharacter is null || !_hasFocus)
         {
             return;
         }

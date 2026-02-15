@@ -23,3 +23,5 @@
 # Local runtime outputs
 Builds/
 Logs/
+out/
+addons/
