@@ -9,7 +9,7 @@ public static class InputSanitizer
 
     public static bool TrySanitizeServer(ref InputCommand command, NetworkConfig config)
     {
-        if (command.Seq == 0)
+        if (command.Seq == 0 || command.InputTick == 0 || command.InputEpoch == 0)
         {
             return false;
         }
@@ -51,6 +51,11 @@ public static class InputSanitizer
         float pitchClamp = Mathf.DegToRad(config.PitchClampDegrees);
         command.MoveAxes = move;
         command.Buttons &= AllowedButtons;
+        if (command.InputEpoch == 0)
+        {
+            command.InputEpoch = 1;
+        }
+
         command.Yaw = IsFinite(command.Yaw) ? Mathf.Wrap(command.Yaw, -Mathf.Pi, Mathf.Pi) : 0.0f;
         command.Pitch = IsFinite(command.Pitch)
             ? Mathf.Clamp(command.Pitch, -pitchClamp, pitchClamp)

@@ -6,7 +6,7 @@ public sealed class NetworkConfig
     public int ServerTickRate { get; set; } = 60;
     public int ClientTickRate { get; set; } = 60;
     public int SnapshotRate { get; set; } = 20;
-    public int ServerInputDelayTicks { get; set; } = 2;
+    public int ServerInputDelayTicks { get; set; } = 3;
     public int InterpolationDelayMs { get; set; } = 100;
     public int MaxExtrapolationMs { get; set; } = 100;
     public bool UseHermiteInterpolation { get; set; } = false;

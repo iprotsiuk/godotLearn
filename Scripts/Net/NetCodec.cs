@@ -90,7 +90,9 @@ public static partial class NetCodec
     {
         WriteUInt(packet, offset, cmd.Seq);
         offset += 4;
-        WriteUInt(packet, offset, cmd.ClientTick);
+        WriteUInt(packet, offset, cmd.InputTick);
+        offset += 4;
+        WriteUInt(packet, offset, cmd.InputEpoch);
         offset += 4;
         WriteFloat(packet, offset, cmd.DtFixed);
         offset += 4;
@@ -115,7 +117,9 @@ public static partial class NetCodec
 
         cmd.Seq = ReadUInt(packet, offset);
         offset += 4;
-        cmd.ClientTick = ReadUInt(packet, offset);
+        cmd.InputTick = ReadUInt(packet, offset);
+        offset += 4;
+        cmd.InputEpoch = ReadUInt(packet, offset);
         offset += 4;
         cmd.DtFixed = ReadFloat(packet, offset);
         offset += 4;

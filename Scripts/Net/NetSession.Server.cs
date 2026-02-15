@@ -7,24 +7,128 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
-    private int GetEffectiveInputDelayTicksForPeer(int peerId)
+    private int ComputeWanDelayTicks(float rttMs)
     {
-        int maxSafeDelayTicks = NetConstants.MaxInputRedundancy - 1;
-        int configuredDelayTicks = _config.ServerInputDelayTicks;
-        int clampedConfigured = Mathf.Clamp(configuredDelayTicks, 0, maxSafeDelayTicks);
-        if (configuredDelayTicks != clampedConfigured && !_inputDelayClampWarned)
-        {
-            GD.PushWarning(
-                $"ServerInputDelayTicks={configuredDelayTicks} exceeds redundancy window; clamped to {clampedConfigured} (MaxInputRedundancy={NetConstants.MaxInputRedundancy}).");
-            _inputDelayClampWarned = true;
-        }
+        float tickMs = 1000.0f / Mathf.Max(1, _config.ServerTickRate);
+        float oneWayMs = Mathf.Max(0.0f, rttMs) * 0.5f;
+        int delayTicks = Mathf.CeilToInt((oneWayMs + NetConstants.WanInputSafetyMs) / tickMs);
+        return Mathf.Clamp(delayTicks, NetConstants.MinWanInputDelayTicks, NetConstants.MaxWanInputDelayTicks);
+    }
 
+    private int GetEffectiveInputDelayTicksForPeer(int peerId, ServerPlayer player)
+    {
         if (_mode == RunMode.ListenServer && peerId == _localPeerId)
         {
             return 0;
         }
 
-        return Mathf.Max(1, clampedConfigured);
+        float rttMs = player.RttMs > 0.01f
+            ? player.RttMs
+            : NetConstants.WanDefaultRttMs;
+        return ComputeWanDelayTicks(rttMs);
+    }
+
+    private void UpdateEffectiveInputDelayForPeer(int peerId, ServerPlayer player, bool sendDelayUpdate)
+    {
+        int nextDelayTicks = GetEffectiveInputDelayTicksForPeer(peerId, player);
+        if (nextDelayTicks == player.EffectiveInputDelayTicks)
+        {
+            return;
+        }
+
+        player.EffectiveInputDelayTicks = nextDelayTicks;
+        if (player.ExpectedInputTickInitialized)
+        {
+            uint minExpected = _serverTick + (uint)Mathf.Max(0, nextDelayTicks);
+            if (player.ExpectedInputTick < minExpected)
+            {
+                player.ExpectedInputTick = minExpected;
+            }
+        }
+
+        if (!sendDelayUpdate || (_mode == RunMode.ListenServer && peerId == _localPeerId))
+        {
+            return;
+        }
+
+        NetCodec.WriteControlDelayUpdate(_controlPacket, nextDelayTicks);
+        SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+    }
+
+    private void EnsureExpectedInputTickInitialized(ServerPlayer player)
+    {
+        if (player.ExpectedInputTickInitialized)
+        {
+            return;
+        }
+
+        player.ExpectedInputTick = _serverTick + (uint)Mathf.Max(0, player.EffectiveInputDelayTicks);
+        player.ExpectedInputTickInitialized = true;
+    }
+
+    private static InputCommand BuildNeutralInput(in InputCommand basis, uint inputTick, float fixedDt, uint epoch)
+    {
+        InputCommand neutral = basis;
+        neutral.InputTick = inputTick;
+        neutral.InputEpoch = epoch;
+        neutral.MoveAxes = Vector2.Zero;
+        neutral.Buttons = InputButtons.None;
+        neutral.DtFixed = fixedDt;
+        return neutral;
+    }
+
+    private void ResetPeerForEpoch(int peerId, ServerPlayer player, uint epoch)
+    {
+        player.Inputs.Clear();
+        player.CurrentInputEpoch = epoch == 0 ? 1u : epoch;
+        player.MissingInputTicks = 0;
+        player.PendingSafetyNeutralTicks = 1;
+        UpdateEffectiveInputDelayForPeer(peerId, player, sendDelayUpdate: false);
+        player.ExpectedInputTick = _serverTick + (uint)Mathf.Max(0, player.EffectiveInputDelayTicks);
+        player.ExpectedInputTickInitialized = true;
+        player.LastInput = BuildNeutralInput(player.LastInput, player.ExpectedInputTick, 1.0f / _config.ServerTickRate, player.CurrentInputEpoch);
+    }
+
+    private void SendServerPingIfDue(int peerId, ServerPlayer player, double nowSec)
+    {
+        if (_mode == RunMode.ListenServer && peerId == _localPeerId)
+        {
+            return;
+        }
+
+        if (nowSec < player.NextPingAtSec)
+        {
+            return;
+        }
+
+        player.NextPingSeq++;
+        if (player.NextPingSeq == 0)
+        {
+            player.NextPingSeq = 1;
+        }
+
+        player.PendingPings[player.NextPingSeq] = nowSec;
+        if (player.PendingPings.Count > NetConstants.MaxOutstandingPings)
+        {
+            ushort oldestSeq = 0;
+            bool found = false;
+            foreach (ushort seq in player.PendingPings.Keys)
+            {
+                oldestSeq = seq;
+                found = true;
+                break;
+            }
+
+            if (found)
+            {
+                player.PendingPings.Remove(oldestSeq);
+            }
+        }
+
+        uint nowMs = (uint)Time.GetTicksMsec();
+        NetCodec.WriteControlPing(_controlPacket, player.NextPingSeq, nowMs);
+        SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+        player.NextPingAtSec = nowSec + NetConstants.PingIntervalSec;
     }
 
     private void ServerPeerConnected(int peerId)
@@ -44,48 +148,59 @@ public partial class NetSession
         _serverTick++;
 
         float fixedDt = 1.0f / _config.ServerTickRate;
+        double nowSec = Time.GetTicksMsec() / 1000.0;
 
         foreach (KeyValuePair<int, ServerPlayer> pair in _serverPlayers)
         {
             int peerId = pair.Key;
             ServerPlayer player = pair.Value;
+            UpdateEffectiveInputDelayForPeer(peerId, player, sendDelayUpdate: true);
+            EnsureExpectedInputTickInitialized(player);
+            SendServerPingIfDue(peerId, player, nowSec);
+
+            uint neededTick = player.ExpectedInputTick;
             InputCommand command;
-            int delayTicks = GetEffectiveInputDelayTicksForPeer(peerId);
-            uint delayTicksU = (uint)delayTicks;
+            bool usedBufferedInput = false;
 
-            if (!player.HasStartedInputStream)
+            if (player.PendingSafetyNeutralTicks > 0)
             {
-                if (!player.HasReceivedAnyInput)
-                {
-                    command = player.LastInput;
-                    command.MoveAxes = Vector2.Zero;
-                    command.Buttons &= ~InputButtons.JumpPressed;
-                    command.DtFixed = fixedDt;
-                }
-                else
-                {
-                    uint startSeq = player.LatestReceivedSeq > delayTicksU
-                        ? player.LatestReceivedSeq - delayTicksU
-                        : 1;
-                    player.LastProcessedSeq = startSeq > 0 ? startSeq - 1 : 0;
-                    player.HasStartedInputStream = true;
-                }
-            }
-
-            uint expected = player.LastProcessedSeq + 1;
-            if (player.Inputs.TryTakeExact(expected, out command) &&
-                InputSanitizer.TrySanitizeServer(ref command, _config))
-            {
+                command = BuildNeutralInput(player.LastInput, neededTick, fixedDt, player.CurrentInputEpoch);
                 player.LastInput = command;
+                player.PendingSafetyNeutralTicks--;
+                player.MissingInputTicks = NetConstants.HoldLastInputTicks + 1;
+            }
+            else if (player.Inputs.TryTake(neededTick, out command) &&
+                     InputSanitizer.TrySanitizeServer(ref command, _config))
+            {
+                command.InputTick = neededTick;
+                command.InputEpoch = player.CurrentInputEpoch;
+                player.LastInput = command;
+                player.LastProcessedSeq = command.Seq;
+                player.MissingInputTicks = 0;
+                usedBufferedInput = true;
+            }
+            else if (player.MissingInputTicks < NetConstants.HoldLastInputTicks)
+            {
+                command = player.LastInput;
+                command.InputTick = neededTick;
+                command.InputEpoch = player.CurrentInputEpoch;
+                command.Buttons &= ~InputButtons.JumpPressed;
+                command.DtFixed = fixedDt;
+                player.MissingInputTicks++;
             }
             else
             {
-                command = player.LastInput;
-                command.Seq = expected;
-                command.Buttons &= ~InputButtons.JumpPressed;
+                command = BuildNeutralInput(player.LastInput, neededTick, fixedDt, player.CurrentInputEpoch);
+                player.LastInput = command;
+                player.MissingInputTicks++;
+            }
+
+            if (!usedBufferedInput)
+            {
                 command.DtFixed = fixedDt;
             }
-            player.LastProcessedSeq = expected;
+
+            player.ExpectedInputTick = neededTick + 1;
 
             player.Character.SetLook(command.Yaw, command.Pitch);
             PlayerMotor.Simulate(player.Character, command, _config);
@@ -161,21 +276,30 @@ public partial class NetSession
         for (int i = 0; i < count; i++)
         {
             InputCommand command = _inputDecodeScratch[i];
-            if (serverPlayer.HasStartedInputStream && command.Seq <= serverPlayer.LastProcessedSeq)
-            {
-                continue;
-            }
-
             if (!InputSanitizer.TrySanitizeServer(ref command, _config))
             {
                 continue;
             }
 
-            serverPlayer.Inputs.Push(command);
-            serverPlayer.LatestReceivedSeq = command.Seq > serverPlayer.LatestReceivedSeq
-                ? command.Seq
-                : serverPlayer.LatestReceivedSeq;
-            serverPlayer.HasReceivedAnyInput = true;
+            if (command.InputEpoch != serverPlayer.CurrentInputEpoch)
+            {
+                ResetPeerForEpoch(fromPeer, serverPlayer, command.InputEpoch);
+            }
+
+            EnsureExpectedInputTickInitialized(serverPlayer);
+            uint expectedInputTick = serverPlayer.ExpectedInputTick;
+            if (command.InputTick < expectedInputTick)
+            {
+                continue;
+            }
+
+            uint maxFutureInputTick = expectedInputTick + (uint)NetConstants.MaxFutureInputTicks;
+            if (command.InputTick > maxFutureInputTick)
+            {
+                continue;
+            }
+
+            serverPlayer.Inputs.Store(command);
         }
     }
 }

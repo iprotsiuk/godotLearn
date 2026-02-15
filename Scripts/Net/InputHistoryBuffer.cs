@@ -61,6 +61,14 @@ public sealed class InputHistoryBuffer
         return false;
     }
 
+    public void Clear()
+    {
+        System.Array.Fill(_valid, false);
+        _minSeq = 1;
+        _maxSeq = 0;
+        _count = 0;
+    }
+
     public void RemoveUpTo(uint seqInclusive)
     {
         if (_count == 0)

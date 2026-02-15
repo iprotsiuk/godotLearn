@@ -14,7 +14,8 @@ public enum InputButtons : byte
 public struct InputCommand
 {
     public uint Seq;
-    public uint ClientTick;
+    public uint InputTick;
+    public uint InputEpoch;
     public float DtFixed;
     public Vector2 MoveAxes;
     public InputButtons Buttons;

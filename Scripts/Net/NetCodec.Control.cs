@@ -13,6 +13,7 @@ public static partial class NetCodec
     public static void WriteControlWelcome(
         byte[] packet,
         int assignedPeer,
+        uint serverTick,
         int serverTickRate,
         int clientTickRate,
         int snapshotRate,
@@ -52,6 +53,7 @@ public static partial class NetCodec
         WriteInt(packet, 66, serverInputDelayTicks);
         WriteFloat(packet, 70, floorSnapLength);
         WriteFloat(packet, 74, groundStickVelocity);
+        WriteUInt(packet, 78, serverTick);
     }
 
     public static void WriteControlPing(byte[] packet, ushort pingSeq, uint clientTimeMs)
@@ -69,6 +71,13 @@ public static partial class NetCodec
         WriteUShort(packet, 2, pingSeq);
         WriteUInt(packet, 4, clientTimeMs);
         WriteUInt(packet, 8, serverTick);
+    }
+
+    public static void WriteControlDelayUpdate(byte[] packet, int delayTicks)
+    {
+        packet[0] = (byte)PacketType.Control;
+        packet[1] = (byte)ControlType.DelayUpdate;
+        WriteInt(packet, 2, delayTicks);
     }
 
     public static bool TryReadControl(ReadOnlySpan<byte> packet, out ControlType type)
@@ -121,9 +130,13 @@ public static partial class NetCodec
 
     public static float ReadControlGroundStickVelocity(ReadOnlySpan<byte> packet) => ReadFloat(packet, 74);
 
+    public static uint ReadControlWelcomeServerTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 78);
+
     public static ushort ReadControlPingSeq(ReadOnlySpan<byte> packet) => ReadUShort(packet, 2);
 
     public static uint ReadControlClientTime(ReadOnlySpan<byte> packet) => ReadUInt(packet, 4);
 
     public static uint ReadControlServerTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 8);
+
+    public static int ReadControlDelayTicks(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
 }

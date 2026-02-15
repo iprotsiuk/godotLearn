@@ -18,9 +18,17 @@ public partial class NetSession : Node
     {
         public required PlayerCharacter Character;
         public ServerInputBuffer Inputs { get; } = new();
-        public bool HasStartedInputStream;
-        public bool HasReceivedAnyInput;
-        public uint LatestReceivedSeq;
+        public readonly Dictionary<ushort, double> PendingPings = new();
+        public bool ExpectedInputTickInitialized;
+        public uint ExpectedInputTick;
+        public uint CurrentInputEpoch = 1;
+        public int MissingInputTicks;
+        public int PendingSafetyNeutralTicks;
+        public float RttMs = NetConstants.WanDefaultRttMs;
+        public float JitterMs;
+        public int EffectiveInputDelayTicks;
+        public ushort NextPingSeq;
+        public double NextPingAtSec;
         public uint LastProcessedSeq;
         public InputCommand LastInput;
     }
@@ -70,10 +78,12 @@ public partial class NetSession : Node
     private ushort _pingSeq;
     private double _nextPingTimeSec;
     private readonly Dictionary<ushort, double> _pingSent = new();
-    private bool _inputDelayClampWarned, _hasFocus = true;
+    private bool _hasFocus = true;
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
+    private uint _lastSentInputTick;
     private uint _lastAckedSeq;
+    private uint _inputEpoch = 1;
     private PlayerCharacter? _localCharacter;
     public bool IsServer => _mode == RunMode.ListenServer;
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
@@ -263,12 +273,18 @@ public partial class NetSession : Node
         _mode = RunMode.None;
         _serverTick = 0;
         _clientTick = 0;
+        _inputEpoch = 1;
         _nextInputSeq = 0;
+        _lastSentInputTick = 0;
         _lastAckedSeq = 0;
         _lastCorrectionMeters = 0.0f;
         _lastCorrectionXZMeters = 0.0f;
         _lastCorrectionYMeters = 0.0f;
         _lastCorrection3DMeters = 0.0f;
+        _rttMs = 0.0f;
+        _jitterMs = 0.0f;
+        _pingSeq = 0;
+        _nextPingTimeSec = 0.0;
         _jumpPressRepeatTicksRemaining = 0;
         _inputState = default;
         _pendingInputs = new InputHistoryBuffer();

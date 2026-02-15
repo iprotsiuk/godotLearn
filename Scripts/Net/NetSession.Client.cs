@@ -22,6 +22,11 @@ public partial class NetSession
 
     private void TickClient(float delta)
     {
+        if (delta > NetConstants.StallEpochThresholdSeconds)
+        {
+            AdvanceInputEpoch(resetTickToServerEstimate: true);
+        }
+
         _clientTick++;
         if (_localCharacter is null)
         {
@@ -59,10 +64,63 @@ public partial class NetSession
             _pingSeq++;
             uint nowMs = (uint)Time.GetTicksMsec();
             _pingSent[_pingSeq] = nowSec;
+            if (_pingSent.Count > NetConstants.MaxOutstandingPings)
+            {
+                ushort oldestSeq = 0;
+                bool found = false;
+                foreach (ushort seq in _pingSent.Keys)
+                {
+                    oldestSeq = seq;
+                    found = true;
+                    break;
+                }
+
+                if (found)
+                {
+                    _pingSent.Remove(oldestSeq);
+                }
+            }
+
             NetCodec.WriteControlPing(_controlPacket, _pingSeq, nowMs);
             SendPacket(1, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
-            _nextPingTimeSec = nowSec + 0.5;
+            _nextPingTimeSec = nowSec + NetConstants.PingIntervalSec;
         }
+    }
+
+    private int GetClientInputDelayTicksForStamping()
+    {
+        if (_mode == RunMode.ListenServer && _localPeerId != 0)
+        {
+            return 0;
+        }
+
+        return Mathf.Max(0, _config.ServerInputDelayTicks);
+    }
+
+    private void RebaseClientTickToServerEstimate()
+    {
+        if (_mode == RunMode.ListenServer)
+        {
+            _clientTick = _serverTick;
+            _lastSentInputTick = 0;
+            return;
+        }
+
+        uint estimatedTick = _serverTick;
+        if (_netClock is not null && _netClock.LastServerTick > 0)
+        {
+            double nowSec = Time.GetTicksMsec() / 1000.0;
+            double estimatedServerTime = _netClock.GetEstimatedServerTime(nowSec);
+            estimatedTick = (uint)Mathf.Max(0, Mathf.RoundToInt((float)(estimatedServerTime * _config.ServerTickRate)));
+        }
+
+        if (estimatedTick < _serverTick)
+        {
+            estimatedTick = _serverTick;
+        }
+
+        _clientTick = estimatedTick;
+        _lastSentInputTick = 0;
     }
 
     private InputCommand BuildInputCommand()
@@ -86,10 +144,18 @@ public partial class NetSession
             buttons |= InputButtons.JumpPressed;
         }
 
+        uint inputTick = _clientTick + (uint)GetClientInputDelayTicksForStamping();
+        if (inputTick <= _lastSentInputTick)
+        {
+            inputTick = _lastSentInputTick + 1;
+        }
+        _lastSentInputTick = inputTick;
+
         InputCommand command = new()
         {
             Seq = ++_nextInputSeq,
-            ClientTick = _clientTick,
+            InputTick = inputTick,
+            InputEpoch = _inputEpoch,
             DtFixed = fixedDt,
             MoveAxes = _inputState.MoveAxes,
             Buttons = buttons,
@@ -162,7 +228,14 @@ public partial class NetSession
         _localCharacter.Velocity = snapshot.Vel;
         _localCharacter.SetGroundedOverride(snapshot.Grounded);
 
-        _lastAckedSeq = snapshot.LastProcessedSeqForThatClient;
+        if (snapshot.LastProcessedSeqForThatClient > _lastAckedSeq)
+        {
+            _lastAckedSeq = snapshot.LastProcessedSeqForThatClient;
+        }
+        if (_lastAckedSeq > _nextInputSeq)
+        {
+            _lastAckedSeq = _nextInputSeq;
+        }
         _pendingInputs.RemoveUpTo(_lastAckedSeq);
 
         for (uint seq = _lastAckedSeq + 1; seq <= _nextInputSeq; seq++)
@@ -185,27 +258,8 @@ public partial class NetSession
         _lastCorrection3DMeters = corr3D;
         _lastCorrectionMeters = corrXZ;
 
-        Vector3 correctionOffset = correctionDelta;
-        correctionOffset.Y = 0.0f;
-
-        if (corrXZ > _config.ReconciliationSnapThreshold)
-        {
-            _localCharacter.ClearRenderCorrection();
-        }
-        else
-        {
-            _localCharacter.AddRenderCorrection(correctionOffset, _config.ReconciliationSmoothMs);
-        }
-
-        Vector3 viewCorrection = new(0.0f, correctionDelta.Y, 0.0f);
-        if (Mathf.Abs(correctionDelta.Y) > 0.5f)
-        {
-            _localCharacter.ClearViewCorrection();
-        }
-        else
-        {
-            _localCharacter.AddViewCorrection(viewCorrection, _config.ReconciliationSmoothMs);
-        }
+        _localCharacter.AddRenderCorrection(correctionDelta, _config.ReconciliationSmoothMs);
+        _localCharacter.AddViewCorrection(correctionDelta, _config.ReconciliationSmoothMs);
     }
 
     private void UpdateRemoteInterpolation()

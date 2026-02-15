@@ -8,17 +8,28 @@ public sealed class ServerInputBuffer
     private readonly InputCommand[] _commands = new InputCommand[Capacity];
     private readonly bool[] _valid = new bool[Capacity];
 
-    public void Push(in InputCommand command)
+    public void Clear()
     {
-        int idx = (int)(command.Seq % Capacity);
+        System.Array.Fill(_valid, false);
+    }
+
+    public void Store(in InputCommand command)
+    {
+        int idx = (int)(command.InputTick % Capacity);
+
+        if (_valid[idx] && _commands[idx].InputTick == command.InputTick && _commands[idx].Seq >= command.Seq)
+        {
+            return;
+        }
+
         _commands[idx] = command;
         _valid[idx] = true;
     }
 
-    public bool TryTakeExact(uint seq, out InputCommand command)
+    public bool TryTake(uint inputTick, out InputCommand command)
     {
-        int idx = (int)(seq % Capacity);
-        if (_valid[idx] && _commands[idx].Seq == seq)
+        int idx = (int)(inputTick % Capacity);
+        if (_valid[idx] && _commands[idx].InputTick == inputTick)
         {
             command = _commands[idx];
             _valid[idx] = false;
@@ -26,38 +37,6 @@ public sealed class ServerInputBuffer
         }
 
         command = default;
-        return false;
-    }
-
-    public bool TryTakeLowestAfter(uint seqExclusive, out InputCommand command, out uint seq)
-    {
-        seq = uint.MaxValue;
-        int bestIdx = -1;
-
-        for (int i = 0; i < Capacity; i++)
-        {
-            if (!_valid[i])
-            {
-                continue;
-            }
-
-            uint candidate = _commands[i].Seq;
-            if (candidate > seqExclusive && candidate < seq)
-            {
-                seq = candidate;
-                bestIdx = i;
-            }
-        }
-
-        if (bestIdx >= 0)
-        {
-            command = _commands[bestIdx];
-            _valid[bestIdx] = false;
-            return true;
-        }
-
-        command = default;
-        seq = 0;
         return false;
     }
 }

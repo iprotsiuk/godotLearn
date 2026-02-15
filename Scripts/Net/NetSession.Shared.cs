@@ -122,9 +122,14 @@ public partial class NetSession
             return;
         }
 
+        int initialDelay = (_mode == RunMode.ListenServer && peerId == _localPeerId)
+            ? 0
+            : Mathf.Clamp(_config.ServerInputDelayTicks, NetConstants.MinWanInputDelayTicks, NetConstants.MaxWanInputDelayTicks);
+
         InputCommand seedInput = new()
         {
             DtFixed = 1.0f / _config.ServerTickRate,
+            InputEpoch = 1,
             Yaw = character.Yaw,
             Pitch = character.Pitch
         };
@@ -133,7 +138,9 @@ public partial class NetSession
         {
             Character = character,
             LastInput = seedInput,
-            LastProcessedSeq = 0
+            LastProcessedSeq = 0,
+            EffectiveInputDelayTicks = initialDelay,
+            NextPingAtSec = (Time.GetTicksMsec() / 1000.0) + NetConstants.PingIntervalSec
         };
     }
 

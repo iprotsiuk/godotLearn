@@ -2,7 +2,7 @@
   "serverTickRate": 60,
   "clientTickRate": 60,
   "snapshotRate": 20,
-  "serverInputDelayTicks": 2,
+  "serverInputDelayTicks": 3,
   "interpolationDelayMs": 100,
   "maxExtrapolationMs": 100,
   "reconciliationSnapThreshold": 1.5,

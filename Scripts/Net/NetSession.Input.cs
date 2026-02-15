@@ -54,7 +54,7 @@ public partial class NetSession
     {
         _hasFocus = false;
         _inputState = default;
-        _jumpPressRepeatTicksRemaining = 0;
+        AdvanceInputEpoch(resetTickToServerEstimate: false);
         ReleaseGameplayActions();
         Input.FlushBufferedEvents();
         Input.MouseMode = Input.MouseModeEnum.Visible;
@@ -63,8 +63,31 @@ public partial class NetSession
     private void OnFocusIn()
     {
         _hasFocus = true;
+        _inputState = default;
+        AdvanceInputEpoch(resetTickToServerEstimate: true);
         ReleaseGameplayActions();
         Input.FlushBufferedEvents();
+    }
+
+    private void AdvanceInputEpoch(bool resetTickToServerEstimate)
+    {
+        _inputEpoch++;
+        if (_inputEpoch == 0)
+        {
+            _inputEpoch = 1;
+        }
+
+        _pendingInputs.Clear();
+        _lastAckedSeq = _nextInputSeq;
+        _jumpPressRepeatTicksRemaining = 0;
+        _lastSentInputTick = 0;
+        _localCharacter?.ClearRenderCorrection();
+        _localCharacter?.ClearViewCorrection();
+
+        if (resetTickToServerEstimate && IsClient)
+        {
+            RebaseClientTickToServerEstimate();
+        }
     }
 
     private static void ReleaseGameplayActions()

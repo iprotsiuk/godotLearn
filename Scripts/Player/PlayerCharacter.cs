@@ -6,6 +6,11 @@ namespace NetRunnerSlice.Player;
 
 public partial class PlayerCharacter : CharacterBody3D
 {
+	private const float MinSmoothSec = 0.01f;
+	private const float MaxCorrectionStepPerFrame = 0.35f;
+	private const float MaxQueuedCorrection = 2.0f;
+	private const float MaxCorrectionSpeed = 100.0f;
+
 	private readonly Node3D _visualRoot = new();
 	private readonly Node3D _visualYawRoot = new();
 	private readonly Node3D _visualPitchRoot = new();
@@ -17,8 +22,10 @@ public partial class PlayerCharacter : CharacterBody3D
 	private Camera3D? _camera;
 
 	private Vector3 _renderOffset;
+	private Vector3 _renderVelocity;
 	private float _renderSmoothSec = 0.1f;
 	private Vector3 _viewOffset;
+	private Vector3 _viewVelocity;
 	private float _viewSmoothSec = 0.1f;
 	private bool _jumpLocked;
 	private bool _hasLeftGroundSinceJump;
@@ -120,14 +127,24 @@ public partial class PlayerCharacter : CharacterBody3D
 
 	public override void _Process(double delta)
 	{
-		if (_renderOffset.LengthSquared() <= 0.000001f)
+		float dt = Mathf.Max(0.0f, (float)delta);
+
+		if (_renderOffset.LengthSquared() <= 0.000001f && _renderVelocity.LengthSquared() <= 0.000001f)
 		{
+			_renderOffset = Vector3.Zero;
+			_renderVelocity = Vector3.Zero;
 			_visualRoot.Position = Vector3.Zero;
 		}
 		else
 		{
-			float renderT = 1.0f - Mathf.Exp((float)(-delta / Mathf.Max(0.001f, _renderSmoothSec)));
-			_renderOffset = _renderOffset.Lerp(Vector3.Zero, renderT);
+			Vector3 next = SmoothDamp(
+				_renderOffset,
+				Vector3.Zero,
+				ref _renderVelocity,
+				Mathf.Max(MinSmoothSec, _renderSmoothSec),
+				MaxCorrectionSpeed,
+				dt);
+			_renderOffset = ClampStep(_renderOffset, next, MaxCorrectionStepPerFrame);
 			_visualRoot.Position = _renderOffset;
 		}
 
@@ -136,14 +153,22 @@ public partial class PlayerCharacter : CharacterBody3D
 			return;
 		}
 
-		if (_viewOffset.LengthSquared() <= 0.000001f)
+		if (_viewOffset.LengthSquared() <= 0.000001f && _viewVelocity.LengthSquared() <= 0.000001f)
 		{
+			_viewOffset = Vector3.Zero;
+			_viewVelocity = Vector3.Zero;
 			_cameraYawRoot.Position = Vector3.Zero;
 		}
 		else
 		{
-			float viewT = 1.0f - Mathf.Exp((float)(-delta / Mathf.Max(0.001f, _viewSmoothSec)));
-			_viewOffset = _viewOffset.Lerp(Vector3.Zero, viewT);
+			Vector3 next = SmoothDamp(
+				_viewOffset,
+				Vector3.Zero,
+				ref _viewVelocity,
+				Mathf.Max(MinSmoothSec, _viewSmoothSec),
+				MaxCorrectionSpeed,
+				dt);
+			_viewOffset = ClampStep(_viewOffset, next, MaxCorrectionStepPerFrame);
 			_cameraYawRoot.Position = _viewOffset;
 		}
 	}
@@ -168,24 +193,28 @@ public partial class PlayerCharacter : CharacterBody3D
 	public void AddRenderCorrection(Vector3 offset, int smoothMs)
 	{
 		_renderOffset += offset;
-		_renderSmoothSec = Mathf.Max(0.01f, smoothMs / 1000.0f);
+		_renderOffset = ClampMagnitude(_renderOffset, MaxQueuedCorrection);
+		_renderSmoothSec = Mathf.Max(MinSmoothSec, smoothMs / 1000.0f);
 	}
 
 	public void ClearRenderCorrection()
 	{
 		_renderOffset = Vector3.Zero;
+		_renderVelocity = Vector3.Zero;
 		_visualRoot.Position = Vector3.Zero;
 	}
 
 	public void AddViewCorrection(Vector3 offset, int smoothMs)
 	{
 		_viewOffset += offset;
-		_viewSmoothSec = Mathf.Max(0.01f, smoothMs / 1000.0f);
+		_viewOffset = ClampMagnitude(_viewOffset, MaxQueuedCorrection);
+		_viewSmoothSec = Mathf.Max(MinSmoothSec, smoothMs / 1000.0f);
 	}
 
 	public void ClearViewCorrection()
 	{
 		_viewOffset = Vector3.Zero;
+		_viewVelocity = Vector3.Zero;
 		if (_camera is not null)
 		{
 			_cameraYawRoot.Position = Vector3.Zero;
@@ -230,5 +259,62 @@ public partial class PlayerCharacter : CharacterBody3D
 
 		grounded = false;
 		return false;
+	}
+
+	private static Vector3 ClampMagnitude(Vector3 value, float maxLength)
+	{
+		float lengthSq = value.LengthSquared();
+		float maxSq = maxLength * maxLength;
+		if (lengthSq <= maxSq || lengthSq <= 0.000001f)
+		{
+			return value;
+		}
+
+		return value.Normalized() * maxLength;
+	}
+
+	private static Vector3 ClampStep(Vector3 current, Vector3 next, float maxStep)
+	{
+		Vector3 delta = next - current;
+		float length = delta.Length();
+		if (length <= maxStep || length <= 0.000001f)
+		{
+			return next;
+		}
+
+		return current + (delta / length) * maxStep;
+	}
+
+	private static Vector3 SmoothDamp(
+		Vector3 current,
+		Vector3 target,
+		ref Vector3 currentVelocity,
+		float smoothTime,
+		float maxSpeed,
+		float deltaTime)
+	{
+		smoothTime = Mathf.Max(0.0001f, smoothTime);
+		deltaTime = Mathf.Max(0.0001f, deltaTime);
+		float omega = 2.0f / smoothTime;
+		float x = omega * deltaTime;
+		float exp = 1.0f / (1.0f + x + (0.48f * x * x) + (0.235f * x * x * x));
+
+		Vector3 change = current - target;
+		Vector3 originalTo = target;
+		float maxChange = maxSpeed * smoothTime;
+		change = ClampMagnitude(change, maxChange);
+		target = current - change;
+
+		Vector3 temp = (currentVelocity + (omega * change)) * deltaTime;
+		currentVelocity = (currentVelocity - (omega * temp)) * exp;
+		Vector3 output = target + ((change + temp) * exp);
+
+		if ((originalTo - current).Dot(output - originalTo) > 0.0f)
+		{
+			output = originalTo;
+			currentVelocity = Vector3.Zero;
+		}
+
+		return output;
 	}
 }
