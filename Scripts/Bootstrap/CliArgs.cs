@@ -10,6 +10,13 @@ public enum StartupRole
     Join
 }
 
+public enum NetworkProfile
+{
+    Default,
+    Lan,
+    Wan
+}
+
 public sealed class CliArgs
 {
     public StartupRole Role { get; private set; } = StartupRole.None;
@@ -31,6 +38,7 @@ public sealed class CliArgs
     public float SimLossPercent { get; private set; }
 
     public int SimSeed { get; private set; } = 1337;
+    public NetworkProfile Profile { get; private set; } = NetworkProfile.Default;
 
     public static CliArgs Parse(string[] args)
     {
@@ -102,6 +110,14 @@ public sealed class CliArgs
                     {
                         parsed.SimSeed = seed;
                     }
+                    break;
+                case "profile":
+                    parsed.Profile = value.ToLowerInvariant() switch
+                    {
+                        "lan" => NetworkProfile.Lan,
+                        "wan" => NetworkProfile.Wan,
+                        _ => NetworkProfile.Default
+                    };
                     break;
             }
         }

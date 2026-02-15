@@ -24,12 +24,16 @@ public partial class Main : Node
     private string _pendingJoinIp = "127.0.0.1";
     private int _pendingJoinPort = 7777;
     private int _simSeed = 1337;
+    private string _activeProfile = "DEFAULT";
     public override void _Ready()
     {
         InputBootstrap.EnsureActions();
         _cli = CliArgs.Parse(OS.GetCmdlineArgs());
         _cli.ApplyWindow();
-        _config = NetworkConfigLoader.Load("res://Config/network_config.json");
+        string configPath = _cli.Profile == NetworkProfile.Lan ? "res://Config/network_config_lan.json" :
+            (_cli.Profile == NetworkProfile.Wan ? "res://Config/network_config_wan.json" : "res://Config/network_config.json");
+        _activeProfile = _cli.Profile == NetworkProfile.Lan ? "LAN" : (_cli.Profile == NetworkProfile.Wan ? "WAN" : "DEFAULT");
+        _config = NetworkConfigLoader.Load(configPath);
         BuildUi();
         EnsureSceneRoot();
         EnsureSession();
@@ -107,15 +111,13 @@ public partial class Main : Node
         _menu = menuScene.Instantiate<MainMenu>();
         _menu.Name = "MainMenu";
         AddChild(_menu);
-        _overlay = new DebugOverlay
-        {
-            Name = "DebugOverlay"
-        };
+        _overlay = new DebugOverlay { Name = "DebugOverlay" };
         AddChild(_overlay);
         _menu.HostRequested += StartHost;
         _menu.JoinRequested += StartJoin;
         _menu.QuitRequested += OnQuit;
         _overlay.NetSimChanged += OnNetSimChanged;
+        _overlay.SetProfileName(_activeProfile);
         if (_cli is not null)
         {
             _menu.SetDefaults(_cli.Ip, _cli.Port);

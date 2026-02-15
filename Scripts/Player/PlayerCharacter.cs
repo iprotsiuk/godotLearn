@@ -16,6 +16,8 @@ public partial class PlayerCharacter : CharacterBody3D
 
 	private Vector3 _renderOffset;
 	private float _renderSmoothSec = 0.1f;
+	private bool _jumpLocked;
+	private bool _wasAirborne;
 
 	private bool _initialized;
 
@@ -26,6 +28,7 @@ public partial class PlayerCharacter : CharacterBody3D
 	public float Pitch { get; private set; }
 
 	public bool Grounded => IsOnFloor();
+	public bool CanJump => !_jumpLocked;
 
 	public Camera3D? LocalCamera => _camera;
 
@@ -143,5 +146,26 @@ public partial class PlayerCharacter : CharacterBody3D
 	{
 		_renderOffset = Vector3.Zero;
 		_renderRoot.Position = Vector3.Zero;
+	}
+
+	public void OnJump()
+	{
+		_jumpLocked = true;
+		_wasAirborne = true;
+	}
+
+	public void PostSimUpdate()
+	{
+		bool grounded = IsOnFloor();
+		if (!grounded)
+		{
+			_wasAirborne = true;
+		}
+
+		if (_jumpLocked && _wasAirborne && grounded)
+		{
+			_jumpLocked = false;
+			_wasAirborne = false;
+		}
 	}
 }

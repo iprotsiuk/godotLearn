@@ -176,16 +176,18 @@ public partial class NetSession
 
         _localCharacter.SetLook(_lookYaw, _lookPitch);
         Vector3 after = _localCharacter.GlobalPosition;
-        float correction = before.DistanceTo(after);
-        _lastCorrectionMeters = correction;
+        Vector3 correctionOffset = before - after;
+        correctionOffset.Y = 0.0f;
+        float horizontalCorrection = new Vector2(correctionOffset.X, correctionOffset.Z).Length();
+        _lastCorrectionMeters = horizontalCorrection;
 
-        if (correction > _config.ReconciliationSnapThreshold)
+        if (horizontalCorrection > _config.ReconciliationSnapThreshold)
         {
             _localCharacter.ClearRenderCorrection();
         }
         else
         {
-            _localCharacter.AddRenderCorrection(before - after, _config.ReconciliationSmoothMs);
+            _localCharacter.AddRenderCorrection(correctionOffset, _config.ReconciliationSmoothMs);
         }
     }
 

@@ -19,9 +19,8 @@ public partial class NetSession : Node
         public required PlayerCharacter Character;
         public ServerInputBuffer Inputs { get; } = new();
         public bool HasStartedInputStream;
-        public bool HasStartSeq;
-        public uint StartSeq;
-        public int WarmupTicksRemaining;
+        public bool HasReceivedAnyInput;
+        public uint LatestReceivedSeq;
         public uint LastProcessedSeq;
         public InputCommand LastInput;
     }
@@ -75,6 +74,7 @@ public partial class NetSession : Node
     private ushort _pingSeq;
     private double _nextPingTimeSec;
     private readonly Dictionary<ushort, double> _pingSent = new();
+    private bool _inputDelayClampWarned;
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
     private uint _lastAckedSeq;

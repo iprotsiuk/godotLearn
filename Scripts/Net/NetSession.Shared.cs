@@ -162,6 +162,14 @@ public partial class NetSession
 
     private void UpdateMetrics()
     {
+        float rttMs = _rttMs;
+        float jitterMs = _jitterMs;
+        if (_mode == RunMode.ListenServer)
+        {
+            rttMs = -1.0f;
+            jitterMs = -1.0f;
+        }
+
         Metrics = new SessionMetrics
         {
             ServerTick = _serverTick,
@@ -169,8 +177,8 @@ public partial class NetSession
             LastAckedInput = _lastAckedSeq,
             PendingInputCount = _pendingInputs.Count,
             LastCorrectionMagnitude = _lastCorrectionMeters,
-            RttMs = _rttMs,
-            JitterMs = _jitterMs,
+            RttMs = rttMs,
+            JitterMs = jitterMs,
             LocalGrounded = _localCharacter?.Grounded ?? false,
             MoveSpeed = _config.MoveSpeed,
             GroundAcceleration = _config.GroundAcceleration,

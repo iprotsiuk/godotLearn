@@ -16,6 +16,7 @@ public partial class DebugOverlay : CanvasLayer
     private SpinBox? _latencyMs;
     private SpinBox? _jitterMs;
     private SpinBox? _lossPercent;
+    private string _profileName = "DEFAULT";
 
     private bool _visible = true;
 
@@ -110,6 +111,11 @@ public partial class DebugOverlay : CanvasLayer
         _lossPercent.Value = lossPercent;
     }
 
+    public void SetProfileName(string profileName)
+    {
+        _profileName = string.IsNullOrWhiteSpace(profileName) ? "DEFAULT" : profileName.ToUpperInvariant();
+    }
+
     public void Update(SessionMetrics metrics, bool isServer, bool isClient)
     {
         if (_statsLabel is null)
@@ -117,18 +123,22 @@ public partial class DebugOverlay : CanvasLayer
             return;
         }
 
+        string rttText = metrics.RttMs < 0.0f ? "N/A" : $"{metrics.RttMs:0.0} ms";
+        string jitterText = metrics.JitterMs < 0.0f ? "N/A" : $"{metrics.JitterMs:0.0} ms";
+
         _statsLabel.Text =
             $"Role: {(isServer ? "Server" : "")}{(isServer && isClient ? "/" : "")}{(isClient ? "Client" : "")}" +
             $"\nServer Tick: {metrics.ServerTick}" +
             $"\nClient Tick: {metrics.ClientTick}" +
-            $"\nRTT: {metrics.RttMs:0.0} ms" +
-            $"\nJitter: {metrics.JitterMs:0.0} ms" +
+            $"\nRTT: {rttText}" +
+            $"\nJitter: {jitterText}" +
             $"\nLast Acked Input: {metrics.LastAckedInput}" +
             $"\nPending Inputs: {metrics.PendingInputCount}" +
             $"\nReconcile Error: {metrics.LastCorrectionMagnitude:0.000} m" +
             $"\nLocal Grounded: {(metrics.LocalGrounded ? "Yes" : "No")}" +
             $"\nMoveSpeed/GroundAccel: {metrics.MoveSpeed:0.###} / {metrics.GroundAcceleration:0.###}" +
             $"\nInput Delay Ticks: {metrics.ServerInputDelayTicks}" +
+            $"\nProfile: {_profileName}" +
             $"\nNetSim: {(metrics.NetworkSimulationEnabled ? "ON" : "OFF")} ({metrics.SimLatencyMs}ms/{metrics.SimJitterMs}ms/{metrics.SimLossPercent:0.0}% loss)";
     }
 

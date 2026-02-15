@@ -10,6 +10,7 @@ public static class PlayerMotor
 	{
 		Vector3 velocity = body.Velocity;
 		bool wasGrounded = body.IsOnFloor();
+		PlayerCharacter? playerCharacter = body as PlayerCharacter;
 
 		Vector2 move = input.MoveAxes;
 		if (move.LengthSquared() > 1.0f)
@@ -30,9 +31,10 @@ public static class PlayerMotor
 		bool jumpPressed = (input.Buttons & InputButtons.JumpPressed) != 0;
 		if (wasGrounded)
 		{
-			if (jumpPressed)
+			if (jumpPressed && playerCharacter is not null && playerCharacter.CanJump)
 			{
 				velocity.Y = config.JumpVelocity;
+				playerCharacter.OnJump();
 			}
 			else
 			{
@@ -46,5 +48,6 @@ public static class PlayerMotor
 
 		body.Velocity = velocity;
 		body.MoveAndSlide();
+		playerCharacter?.PostSimUpdate();
 	}
 }

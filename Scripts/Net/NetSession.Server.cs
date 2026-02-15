@@ -24,6 +24,17 @@ public partial class NetSession
         _serverTick++;
 
         float fixedDt = 1.0f / _config.ServerTickRate;
+        int maxSafeDelayTicks = NetConstants.MaxInputRedundancy - 1;
+        int configuredDelayTicks = _config.ServerInputDelayTicks;
+        int delayTicks = Mathf.Clamp(configuredDelayTicks, 0, maxSafeDelayTicks);
+        uint delayTicksU = (uint)delayTicks;
+        if (configuredDelayTicks != delayTicks && !_inputDelayClampWarned)
+        {
+            GD.PushWarning(
+                $"ServerInputDelayTicks={configuredDelayTicks} exceeds redundancy window; clamped to {delayTicks} (MaxInputRedundancy={NetConstants.MaxInputRedundancy}).");
+            _inputDelayClampWarned = true;
+        }
+
         foreach (KeyValuePair<int, ServerPlayer> pair in _serverPlayers)
         {
             ServerPlayer player = pair.Value;
@@ -31,60 +42,37 @@ public partial class NetSession
 
             if (!player.HasStartedInputStream)
             {
-                if (player.HasStartSeq && player.WarmupTicksRemaining > 0)
+                if (!player.HasReceivedAnyInput)
                 {
-                    player.WarmupTicksRemaining--;
                     command = player.LastInput;
                     command.MoveAxes = Vector2.Zero;
                     command.Buttons &= ~InputButtons.JumpPressed;
                     command.DtFixed = fixedDt;
-                }
-                else if (player.HasStartSeq)
-                {
-                    player.HasStartedInputStream = true;
-                    player.LastProcessedSeq = player.StartSeq > 0 ? (player.StartSeq - 1) : 0;
-                    uint expected = player.LastProcessedSeq + 1;
-                    if (player.Inputs.TryTakeExact(expected, out command) &&
-                        InputSanitizer.TrySanitizeServer(ref command, _config))
-                    {
-                        player.LastInput = command;
-                    }
-                    else
-                    {
-                        command = player.LastInput;
-                        command.Seq = expected;
-                        command.Buttons &= ~InputButtons.JumpPressed;
-                        command.DtFixed = fixedDt;
-                    }
-
-                    player.LastProcessedSeq = expected;
                 }
                 else
                 {
-                    command = player.LastInput;
-                    command.MoveAxes = Vector2.Zero;
-                    command.Buttons &= ~InputButtons.JumpPressed;
-                    command.DtFixed = fixedDt;
+                    uint startSeq = player.LatestReceivedSeq > delayTicksU
+                        ? player.LatestReceivedSeq - delayTicksU
+                        : 1;
+                    player.LastProcessedSeq = startSeq > 0 ? startSeq - 1 : 0;
+                    player.HasStartedInputStream = true;
                 }
+            }
+
+            uint expected = player.LastProcessedSeq + 1;
+            if (player.Inputs.TryTakeExact(expected, out command) &&
+                InputSanitizer.TrySanitizeServer(ref command, _config))
+            {
+                player.LastInput = command;
             }
             else
             {
-                uint expected = player.LastProcessedSeq + 1;
-                if (player.Inputs.TryTakeExact(expected, out command) &&
-                    InputSanitizer.TrySanitizeServer(ref command, _config))
-                {
-                    player.LastInput = command;
-                }
-                else
-                {
-                    command = player.LastInput;
-                    command.Seq = expected;
-                    command.Buttons &= ~InputButtons.JumpPressed;
-                    command.DtFixed = fixedDt;
-                }
-
-                player.LastProcessedSeq = expected;
+                command = player.LastInput;
+                command.Seq = expected;
+                command.Buttons &= ~InputButtons.JumpPressed;
+                command.DtFixed = fixedDt;
             }
+            player.LastProcessedSeq = expected;
 
             player.Character.SetLook(command.Yaw, command.Pitch);
             PlayerMotor.Simulate(player.Character, command, _config);
@@ -170,21 +158,11 @@ public partial class NetSession
                 continue;
             }
 
-            if (!serverPlayer.HasStartedInputStream)
-            {
-                if (!serverPlayer.HasStartSeq || command.Seq < serverPlayer.StartSeq)
-                {
-                    serverPlayer.StartSeq = command.Seq;
-                }
-
-                if (!serverPlayer.HasStartSeq)
-                {
-                    serverPlayer.HasStartSeq = true;
-                    serverPlayer.WarmupTicksRemaining = Mathf.Max(0, _config.ServerInputDelayTicks);
-                }
-            }
-
             serverPlayer.Inputs.Push(command);
+            serverPlayer.LatestReceivedSeq = command.Seq > serverPlayer.LatestReceivedSeq
+                ? command.Seq
+                : serverPlayer.LatestReceivedSeq;
+            serverPlayer.HasReceivedAnyInput = true;
         }
     }
 }
