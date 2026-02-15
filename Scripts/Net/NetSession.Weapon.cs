@@ -38,7 +38,7 @@ public partial class NetSession
 
 		Vector3 origin = _localCharacter.LocalCamera?.GlobalPosition ?? (_localCharacter.GlobalPosition + new Vector3(0.0f, 1.55f, 0.0f));
 		Vector3 direction = YawPitchToDirection(_lookYaw, _lookPitch).Normalized();
-		SpawnLocalProjectile(origin, direction);
+		SpawnLocalProjectile(origin, direction, _localCharacter.Velocity);
 
 		FireRequest request = new()
 		{
@@ -48,7 +48,10 @@ public partial class NetSession
 			Yaw = _lookYaw,
 			Pitch = _lookPitch
 		};
-		GD.Print($"FireRequest: peer={_localPeerId} estTick={request.EstimatedServerTickAtFire} epoch={request.InputEpoch}");
+		float fireDelayMs = _dynamicInterpolationDelayMs > 0.01f
+			? _dynamicInterpolationDelayMs
+			: Mathf.Max(0.0f, _config.InterpolationDelayMs);
+		GD.Print($"FireRequest: peer={_localPeerId} estTick={request.EstimatedServerTickAtFire} delayMs={fireDelayMs:0.0} epoch={request.InputEpoch}");
 
 		NetCodec.WriteFire(_firePacket, request);
 		if (_mode == RunMode.ListenServer)
@@ -63,25 +66,23 @@ public partial class NetSession
 
 	private uint EstimateServerTickAtFire()
 	{
-		if (_mode == RunMode.ListenServer)
+		double nowSec = Time.GetTicksMsec() / 1000.0;
+		double estimatedServerTimeNow = (_netClock is not null && _netClock.LastServerTick > 0)
+			? _netClock.GetEstimatedServerTime(nowSec)
+			: (_serverTick / (double)Mathf.Max(1, _config.ServerTickRate));
+
+		float delayMs = _dynamicInterpolationDelayMs > 0.01f
+			? _dynamicInterpolationDelayMs
+			: Mathf.Max(0.0f, _config.InterpolationDelayMs);
+		double delaySec = delayMs / 1000.0;
+		double viewServerTime = estimatedServerTimeNow - delaySec;
+		double tickAsDouble = Mathf.FloorToInt((float)(viewServerTime * _config.ServerTickRate));
+		if (tickAsDouble <= 0.0)
 		{
-			return _serverTick;
+			return 0;
 		}
 
-		uint estimatedTick = _serverTick;
-		if (_netClock is not null && _netClock.LastServerTick > 0)
-		{
-			double nowSec = Time.GetTicksMsec() / 1000.0;
-			double estimatedServerTime = _netClock.GetEstimatedServerTime(nowSec);
-			estimatedTick = (uint)Mathf.Max(0, Mathf.RoundToInt((float)(estimatedServerTime * _config.ServerTickRate)));
-		}
-
-		if (estimatedTick < _serverTick)
-		{
-			estimatedTick = _serverTick;
-		}
-
-		return estimatedTick;
+		return (uint)tickAsDouble;
 	}
 
 	private void HandleFire(int fromPeer, byte[] packet)
@@ -433,12 +434,14 @@ public partial class NetSession
 		}
 	}
 
-	private void SpawnLocalProjectile(Vector3 origin, Vector3 direction)
+	private void SpawnLocalProjectile(Vector3 origin, Vector3 direction, Vector3 shooterVelocity)
 	{
 		if (_mode == RunMode.None)
 		{
 			return;
 		}
+
+		origin += direction * 0.25f;
 
 		MeshInstance3D projectile = new()
 		{
@@ -457,7 +460,7 @@ public partial class NetSession
 		_visualProjectiles.Add(new VisualProjectile
 		{
 			Node = projectile,
-			Velocity = direction * VisualProjectileSpeed,
+			Velocity = (direction * VisualProjectileSpeed) + shooterVelocity,
 			ExpireAtSec = nowSec + VisualProjectileLifetimeSec
 		});
 	}
