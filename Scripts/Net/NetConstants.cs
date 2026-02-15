@@ -29,6 +29,8 @@ public static class NetConstants
     public const int MinWanInputDelayTicks = 3;
     public const int MaxWanInputDelayTicks = 10;
     public const float WanInputSafetyMs = 20.0f;
+    public const float WanInputJitterScale = 1.0f;
+    public const double WanDelayDecreaseCooldownSec = 2.0;
     public const float WanDefaultRttMs = 100.0f;
     public const int MaxFutureInputTicks = 120;
     public const int HoldLastInputTicks = 2;

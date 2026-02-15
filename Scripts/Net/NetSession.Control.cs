@@ -179,6 +179,6 @@ public partial class NetSession
             serverPlayer.JitterMs = Mathf.Lerp(serverPlayer.JitterMs, deltaRtt, NetConstants.RttEwmaAlpha);
         }
 
-        UpdateEffectiveInputDelayForPeer(fromPeer, serverPlayer, sendDelayUpdate: true);
+        UpdateEffectiveInputDelayForPeer(fromPeer, serverPlayer, sendDelayUpdate: true, nowSec);
     }
 }

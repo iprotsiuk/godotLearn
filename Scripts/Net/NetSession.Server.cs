@@ -41,11 +41,12 @@ public partial class NetSession
         }
     }
 
-    private int ComputeWanDelayTicks(float rttMs)
+    private int ComputeWanDelayTicks(float rttMs, float jitterMs)
     {
         float tickMs = 1000.0f / Mathf.Max(1, _config.ServerTickRate);
         float oneWayMs = Mathf.Max(0.0f, rttMs) * 0.5f;
-        int delayTicks = Mathf.CeilToInt((oneWayMs + NetConstants.WanInputSafetyMs) / tickMs);
+        float totalMs = oneWayMs + NetConstants.WanInputSafetyMs + (Mathf.Max(0.0f, jitterMs) * NetConstants.WanInputJitterScale);
+        int delayTicks = Mathf.CeilToInt(totalMs / tickMs);
         return Mathf.Clamp(delayTicks, NetConstants.MinWanInputDelayTicks, NetConstants.MaxWanInputDelayTicks);
     }
 
@@ -59,25 +60,46 @@ public partial class NetSession
         float rttMs = player.RttMs > 0.01f
             ? player.RttMs
             : NetConstants.WanDefaultRttMs;
-        return ComputeWanDelayTicks(rttMs);
+        return ComputeWanDelayTicks(rttMs, player.JitterMs);
     }
 
-    private void UpdateEffectiveInputDelayForPeer(int peerId, ServerPlayer player, bool sendDelayUpdate)
+    private void UpdateEffectiveInputDelayForPeer(int peerId, ServerPlayer player, bool sendDelayUpdate, double nowSec = -1.0)
     {
+        if (nowSec < 0.0)
+        {
+            nowSec = Time.GetTicksMsec() / 1000.0;
+        }
+
+        int currentDelayTicks = player.EffectiveInputDelayTicks;
         int nextDelayTicks = GetEffectiveInputDelayTicksForPeer(peerId, player);
-        if (nextDelayTicks == player.EffectiveInputDelayTicks)
+        if (nextDelayTicks > currentDelayTicks)
+        {
+            player.EffectiveInputDelayTicks = nextDelayTicks;
+        }
+        else if (nextDelayTicks < currentDelayTicks)
+        {
+            if (nowSec < player.DelayDecreaseBlockedUntilSec)
+            {
+                nextDelayTicks = currentDelayTicks;
+            }
+            else
+            {
+                player.EffectiveInputDelayTicks = nextDelayTicks;
+                player.DelayDecreaseBlockedUntilSec = nowSec + NetConstants.WanDelayDecreaseCooldownSec;
+            }
+        }
+
+        if (player.EffectiveInputDelayTicks == currentDelayTicks)
         {
             return;
         }
-
-        player.EffectiveInputDelayTicks = nextDelayTicks;
 
         if (!sendDelayUpdate || (_mode == RunMode.ListenServer && peerId == _localPeerId))
         {
             return;
         }
 
-        NetCodec.WriteControlDelayUpdate(_controlPacket, nextDelayTicks);
+        NetCodec.WriteControlDelayUpdate(_controlPacket, player.EffectiveInputDelayTicks);
         SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
     }
 
@@ -168,7 +190,7 @@ public partial class NetSession
         {
             int peerId = pair.Key;
             ServerPlayer player = pair.Value;
-            UpdateEffectiveInputDelayForPeer(peerId, player, sendDelayUpdate: true);
+            UpdateEffectiveInputDelayForPeer(peerId, player, sendDelayUpdate: true, nowSec);
             SendServerPingIfDue(peerId, player, nowSec);
 
             uint neededTick = _serverTick;

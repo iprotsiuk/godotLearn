@@ -34,6 +34,7 @@ public partial class NetSession : Node
         public int EffectiveInputDelayTicks;
         public ushort NextPingSeq;
         public double NextPingAtSec;
+        public double DelayDecreaseBlockedUntilSec;
         public uint LastProcessedSeq;
         public InputCommand LastInput;
         public uint DroppedOldInputCount;
