@@ -49,6 +49,9 @@ public struct SessionMetrics
     public uint LastAckedInput;
     public int PendingInputCount;
     public float LastCorrectionMagnitude;
+    public float CorrXZ;
+    public float CorrY;
+    public float Corr3D;
     public float RttMs;
     public float JitterMs;
     public bool LocalGrounded;

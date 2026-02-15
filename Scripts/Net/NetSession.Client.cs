@@ -161,6 +161,7 @@ public partial class NetSession
         Vector3 before = _localCharacter.GlobalPosition;
         _localCharacter.GlobalPosition = snapshot.Pos;
         _localCharacter.Velocity = snapshot.Vel;
+        _localCharacter.SetGroundedOverride(snapshot.Grounded);
 
         _lastAckedSeq = snapshot.LastProcessedSeqForThatClient;
         _pendingInputs.RemoveUpTo(_lastAckedSeq);
@@ -176,12 +177,19 @@ public partial class NetSession
 
         _localCharacter.SetLook(_lookYaw, _lookPitch);
         Vector3 after = _localCharacter.GlobalPosition;
-        Vector3 correctionOffset = before - after;
-        correctionOffset.Y = 0.0f;
-        float horizontalCorrection = new Vector2(correctionOffset.X, correctionOffset.Z).Length();
-        _lastCorrectionMeters = horizontalCorrection;
+        Vector3 correctionDelta = before - after;
+        float corrXZ = new Vector2(correctionDelta.X, correctionDelta.Z).Length();
+        float corrY = Mathf.Abs(correctionDelta.Y);
+        float corr3D = correctionDelta.Length();
+        _lastCorrectionXZMeters = corrXZ;
+        _lastCorrectionYMeters = corrY;
+        _lastCorrection3DMeters = corr3D;
+        _lastCorrectionMeters = corrXZ;
 
-        if (horizontalCorrection > _config.ReconciliationSnapThreshold)
+        Vector3 correctionOffset = correctionDelta;
+        correctionOffset.Y = 0.0f;
+
+        if (corrXZ > _config.ReconciliationSnapThreshold)
         {
             _localCharacter.ClearRenderCorrection();
         }
@@ -205,7 +213,7 @@ public partial class NetSession
         foreach (KeyValuePair<int, RemoteEntity> pair in _remotePlayers)
         {
             RemoteEntity remote = pair.Value;
-            if (!remote.Buffer.TrySample(renderTime, maxExtrap, out RemoteSample sample))
+            if (!remote.Buffer.TrySample(renderTime, maxExtrap, _config.UseHermiteInterpolation, out RemoteSample sample))
             {
                 continue;
             }

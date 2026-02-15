@@ -33,16 +33,13 @@ public partial class NetSession : Node
 
     private readonly Dictionary<int, ServerPlayer> _serverPlayers = new();
     private readonly Dictionary<int, RemoteEntity> _remotePlayers = new();
-
     private readonly byte[] _inputPacket = new byte[NetConstants.InputPacketBytes];
     private readonly byte[] _snapshotPacket = new byte[NetConstants.SnapshotPacketBytes];
     private readonly byte[] _controlPacket = new byte[NetConstants.ControlPacketBytes];
-
     private readonly InputCommand[] _inputDecodeScratch = new InputCommand[NetConstants.MaxInputRedundancy];
     private readonly InputCommand[] _inputSendScratch = new InputCommand[NetConstants.MaxInputRedundancy];
     private readonly PlayerStateSnapshot[] _snapshotDecodeScratch = new PlayerStateSnapshot[NetConstants.MaxPlayers];
     private readonly PlayerStateSnapshot[] _snapshotSendScratch = new PlayerStateSnapshot[NetConstants.MaxPlayers];
-
     private RunMode _mode;
     private NetworkConfig _config = new();
     private Node3D? _playerRoot;
@@ -69,6 +66,9 @@ public partial class NetSession : Node
     private bool _jumpHeldLastTick;
 
     private float _lastCorrectionMeters;
+    private float _lastCorrectionXZMeters;
+    private float _lastCorrectionYMeters;
+    private float _lastCorrection3DMeters;
     private float _rttMs;
     private float _jitterMs;
     private ushort _pingSeq;
@@ -267,6 +267,9 @@ public partial class NetSession : Node
         _nextInputSeq = 0;
         _lastAckedSeq = 0;
         _lastCorrectionMeters = 0.0f;
+        _lastCorrectionXZMeters = 0.0f;
+        _lastCorrectionYMeters = 0.0f;
+        _lastCorrection3DMeters = 0.0f;
         _pendingInputs = new InputHistoryBuffer();
         foreach (ServerPlayer player in _serverPlayers.Values)
         {

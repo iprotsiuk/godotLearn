@@ -11,6 +11,10 @@ public static class PlayerMotor
 		Vector3 velocity = body.Velocity;
 		bool wasGrounded = body.IsOnFloor();
 		PlayerCharacter? playerCharacter = body as PlayerCharacter;
+		if (playerCharacter is not null && playerCharacter.TryConsumeGroundedOverride(out bool groundedOverride))
+		{
+			wasGrounded = groundedOverride;
+		}
 
 		Vector2 move = input.MoveAxes;
 		if (move.LengthSquared() > 1.0f)

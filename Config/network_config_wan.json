@@ -21,5 +21,6 @@
   "simulatedLatencyMs": 0,
   "simulatedJitterMs": 0,
   "simulatedLossPercent": 0.0,
-  "simulationSeed": 1337
+  "simulationSeed": 1337,
+  "useHermiteInterpolation": false
 }

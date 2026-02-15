@@ -6,9 +6,11 @@ namespace NetRunnerSlice.Player;
 
 public partial class PlayerCharacter : CharacterBody3D
 {
-	private readonly Node3D _renderRoot = new();
-	private readonly Node3D _yawRoot = new();
-	private readonly Node3D _pitchRoot = new();
+	private readonly Node3D _visualRoot = new();
+	private readonly Node3D _visualYawRoot = new();
+	private readonly Node3D _visualPitchRoot = new();
+	private readonly Node3D _cameraYawRoot = new();
+	private readonly Node3D _cameraPitchRoot = new();
 
 	private MeshInstance3D? _bodyMesh;
 	private MeshInstance3D? _headMesh;
@@ -17,7 +19,9 @@ public partial class PlayerCharacter : CharacterBody3D
 	private Vector3 _renderOffset;
 	private float _renderSmoothSec = 0.1f;
 	private bool _jumpLocked;
-	private bool _wasAirborne;
+	private bool _hasLeftGroundSinceJump;
+	private bool _groundedOverrideValid;
+	private bool _groundedOverrideValue;
 
 	private bool _initialized;
 
@@ -56,10 +60,14 @@ public partial class PlayerCharacter : CharacterBody3D
 		collision.Position = new Vector3(0.0f, 0.9f, 0.0f);
 		AddChild(collision);
 
-		AddChild(_renderRoot);
-		_renderRoot.AddChild(_yawRoot);
-		_yawRoot.AddChild(_pitchRoot);
-		_pitchRoot.Position = new Vector3(0.0f, 1.55f, 0.0f);
+		AddChild(_visualRoot);
+		_visualRoot.AddChild(_visualYawRoot);
+		_visualYawRoot.AddChild(_visualPitchRoot);
+		_visualPitchRoot.Position = new Vector3(0.0f, 1.55f, 0.0f);
+
+		AddChild(_cameraYawRoot);
+		_cameraYawRoot.AddChild(_cameraPitchRoot);
+		_cameraPitchRoot.Position = new Vector3(0.0f, 1.55f, 0.0f);
 
 		_bodyMesh = new MeshInstance3D
 		{
@@ -86,8 +94,8 @@ public partial class PlayerCharacter : CharacterBody3D
 
 		_bodyMesh.MaterialOverride = material;
 		_headMesh.MaterialOverride = material;
-		_yawRoot.AddChild(_bodyMesh);
-		_pitchRoot.AddChild(_headMesh);
+		_visualYawRoot.AddChild(_bodyMesh);
+		_visualPitchRoot.AddChild(_headMesh);
 
 		if (withCamera)
 		{
@@ -100,7 +108,7 @@ public partial class PlayerCharacter : CharacterBody3D
 				Fov = 90.0f
 			};
 
-			_pitchRoot.AddChild(_camera);
+			_cameraPitchRoot.AddChild(_camera);
 			_bodyMesh.Visible = false;
 			_headMesh.Visible = false;
 		}
@@ -112,21 +120,23 @@ public partial class PlayerCharacter : CharacterBody3D
 	{
 		if (_renderOffset.LengthSquared() <= 0.000001f)
 		{
-			_renderRoot.Position = Vector3.Zero;
+			_visualRoot.Position = Vector3.Zero;
 			return;
 		}
 
 		float t = 1.0f - Mathf.Exp((float)(-delta / Mathf.Max(0.001f, _renderSmoothSec)));
 		_renderOffset = _renderOffset.Lerp(Vector3.Zero, t);
-		_renderRoot.Position = _renderOffset;
+		_visualRoot.Position = _renderOffset;
 	}
 
 	public void SetLook(float yaw, float pitch)
 	{
 		Yaw = yaw;
 		Pitch = pitch;
-		_yawRoot.Rotation = new Vector3(0.0f, yaw, 0.0f);
-		_pitchRoot.Rotation = new Vector3(pitch, 0.0f, 0.0f);
+		_visualYawRoot.Rotation = new Vector3(0.0f, yaw, 0.0f);
+		_visualPitchRoot.Rotation = new Vector3(pitch, 0.0f, 0.0f);
+		_cameraYawRoot.Rotation = new Vector3(0.0f, yaw, 0.0f);
+		_cameraPitchRoot.Rotation = new Vector3(pitch, 0.0f, 0.0f);
 	}
 
 	public void SetFromSnapshot(in PlayerStateSnapshot snapshot)
@@ -145,13 +155,13 @@ public partial class PlayerCharacter : CharacterBody3D
 	public void ClearRenderCorrection()
 	{
 		_renderOffset = Vector3.Zero;
-		_renderRoot.Position = Vector3.Zero;
+		_visualRoot.Position = Vector3.Zero;
 	}
 
 	public void OnJump()
 	{
 		_jumpLocked = true;
-		_wasAirborne = true;
+		_hasLeftGroundSinceJump = false;
 	}
 
 	public void PostSimUpdate()
@@ -159,13 +169,32 @@ public partial class PlayerCharacter : CharacterBody3D
 		bool grounded = IsOnFloor();
 		if (!grounded)
 		{
-			_wasAirborne = true;
+			_hasLeftGroundSinceJump = true;
 		}
 
-		if (_jumpLocked && _wasAirborne && grounded)
+		if (_jumpLocked && grounded && _hasLeftGroundSinceJump)
 		{
 			_jumpLocked = false;
-			_wasAirborne = false;
+			_hasLeftGroundSinceJump = false;
 		}
+	}
+
+	public void SetGroundedOverride(bool grounded)
+	{
+		_groundedOverrideValid = true;
+		_groundedOverrideValue = grounded;
+	}
+
+	public bool TryConsumeGroundedOverride(out bool grounded)
+	{
+		if (_groundedOverrideValid)
+		{
+			grounded = _groundedOverrideValue;
+			_groundedOverrideValid = false;
+			return true;
+		}
+
+		grounded = false;
+		return false;
 	}
 }

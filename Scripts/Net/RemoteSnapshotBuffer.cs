@@ -59,7 +59,7 @@ public sealed class RemoteSnapshotBuffer
         _count++;
     }
 
-    public bool TrySample(double renderTime, double maxExtrapolation, out RemoteSample sampled)
+    public bool TrySample(double renderTime, double maxExtrapolation, bool useHermiteInterpolation, out RemoteSample sampled)
     {
         sampled = default;
         if (_count == 0)
@@ -81,7 +81,7 @@ public sealed class RemoteSnapshotBuffer
             {
                 float t = (float)((renderTime - aTime) / (bTime - aTime));
                 float segmentDuration = (float)(bTime - aTime);
-                sampled = Interpolate(_samples[i], _samples[i + 1], t, segmentDuration);
+                sampled = Interpolate(_samples[i], _samples[i + 1], t, segmentDuration, useHermiteInterpolation);
                 return true;
             }
         }
@@ -98,10 +98,15 @@ public sealed class RemoteSnapshotBuffer
         return true;
     }
 
-    private static RemoteSample Interpolate(in RemoteSample a, in RemoteSample b, float t, float segmentDuration)
+    private static RemoteSample Interpolate(
+        in RemoteSample a,
+        in RemoteSample b,
+        float t,
+        float segmentDuration,
+        bool useHermiteInterpolation)
     {
         Vector3 pos;
-        if (segmentDuration > 0.0001f)
+        if (useHermiteInterpolation && segmentDuration > 0.0001f)
         {
             pos = HermitePosition(a.Pos, a.Vel, b.Pos, b.Vel, t, segmentDuration);
         }

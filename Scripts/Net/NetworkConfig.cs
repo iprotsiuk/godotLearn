@@ -9,6 +9,7 @@ public sealed class NetworkConfig
     public int ServerInputDelayTicks { get; set; } = 2;
     public int InterpolationDelayMs { get; set; } = 100;
     public int MaxExtrapolationMs { get; set; } = 100;
+    public bool UseHermiteInterpolation { get; set; } = false;
     public float ReconciliationSnapThreshold { get; set; } = 1.5f;
     public int ReconciliationSmoothMs { get; set; } = 100;
     public int MaxPlayers { get; set; } = 16;
