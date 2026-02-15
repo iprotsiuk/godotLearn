@@ -69,15 +69,14 @@ public partial class NetSession
     {
         float fixedDt = 1.0f / _config.ClientTickRate;
 
-        float x = Input.GetActionStrength("move_right") - Input.GetActionStrength("move_left");
-        float y = Input.GetActionStrength("move_forward") - Input.GetActionStrength("move_back");
-
-        bool jumpHeld = Input.IsActionPressed("jump");
-        bool jumpPressed = jumpHeld && !_jumpHeldLastTick;
-        _jumpHeldLastTick = jumpHeld;
+        bool jumpPressed = _jumpPressRepeatTicksRemaining > 0;
+        if (_jumpPressRepeatTicksRemaining > 0)
+        {
+            _jumpPressRepeatTicksRemaining--;
+        }
 
         InputButtons buttons = InputButtons.None;
-        if (jumpHeld)
+        if (_inputState.JumpHeld)
         {
             buttons |= InputButtons.JumpHeld;
         }
@@ -92,7 +91,7 @@ public partial class NetSession
             Seq = ++_nextInputSeq,
             ClientTick = _clientTick,
             DtFixed = fixedDt,
-            MoveAxes = new Vector2(x, y),
+            MoveAxes = _inputState.MoveAxes,
             Buttons = buttons,
             Yaw = _lookYaw,
             Pitch = _lookPitch

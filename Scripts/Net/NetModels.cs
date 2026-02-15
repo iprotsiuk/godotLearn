@@ -48,6 +48,7 @@ public struct SessionMetrics
     public uint ClientTick;
     public uint LastAckedInput;
     public int PendingInputCount;
+    public int JumpRepeatRemaining;
     public float LastCorrectionMagnitude;
     public float CorrXZ;
     public float CorrY;

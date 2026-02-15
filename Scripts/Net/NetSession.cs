@@ -54,17 +54,13 @@ public partial class NetSession : Node
     private uint _clientTick;
     private int _localPeerId;
     private int _snapshotEveryTicks = 3;
-
     private bool _simEnabled;
     private int _simLatency;
     private int _simJitter;
     private float _simLoss;
     private int _simSeed;
-
     private float _lookYaw;
     private float _lookPitch;
-    private bool _jumpHeldLastTick;
-
     private float _lastCorrectionMeters;
     private float _lastCorrectionXZMeters;
     private float _lastCorrectionYMeters;
@@ -82,7 +78,6 @@ public partial class NetSession : Node
     public bool IsServer => _mode == RunMode.ListenServer;
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
     public SessionMetrics Metrics { get; private set; }
-
     public void Initialize(NetworkConfig config, Node3D playerRoot)
     {
         _config = config;
@@ -119,7 +114,6 @@ public partial class NetSession : Node
         _spawnOrigin = Transform3D.Identity;
         _spawnYaw = 0.0f;
     }
-
     public override void _Ready()
     {
         // Godot polls MultiplayerAPI during process_frame by default; we poll manually in physics for fixed-step netcode.
@@ -171,6 +165,7 @@ public partial class NetSession : Node
         {
             return;
         }
+        CaptureInputState();
         UpdateRemoteInterpolation();
         UpdateMetrics();
     }
@@ -188,6 +183,10 @@ public partial class NetSession : Node
             _lookPitch -= (float)(mouseMotion.Relative.Y * _config.MouseSensitivity);
             _lookPitch = Mathf.Clamp(_lookPitch, -maxPitch, maxPitch);
             _localCharacter.SetLook(_lookYaw, _lookPitch);
+        }
+        if (@event.IsActionPressed("jump"))
+        {
+            TryLatchGroundedJump();
         }
 
         if (@event.IsActionPressed("quit"))
@@ -270,6 +269,8 @@ public partial class NetSession : Node
         _lastCorrectionXZMeters = 0.0f;
         _lastCorrectionYMeters = 0.0f;
         _lastCorrection3DMeters = 0.0f;
+        _jumpPressRepeatTicksRemaining = 0;
+        _inputState = default;
         _pendingInputs = new InputHistoryBuffer();
         foreach (ServerPlayer player in _serverPlayers.Values)
         {

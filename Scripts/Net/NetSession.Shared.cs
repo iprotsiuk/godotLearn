@@ -176,6 +176,7 @@ public partial class NetSession
             ClientTick = _clientTick,
             LastAckedInput = _lastAckedSeq,
             PendingInputCount = _pendingInputs.Count,
+            JumpRepeatRemaining = _jumpPressRepeatTicksRemaining,
             LastCorrectionMagnitude = _lastCorrectionMeters,
             CorrXZ = _lastCorrectionXZMeters,
             CorrY = _lastCorrectionYMeters,

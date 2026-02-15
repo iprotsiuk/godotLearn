@@ -134,6 +134,7 @@ public partial class DebugOverlay : CanvasLayer
             $"\nJitter: {jitterText}" +
             $"\nLast Acked Input: {metrics.LastAckedInput}" +
             $"\nPending Inputs: {metrics.PendingInputCount}" +
+            $"\nJump Repeat Left: {metrics.JumpRepeatRemaining}" +
             $"\nReconcile XZ (m): {metrics.CorrXZ:0.000}" +
             $"\nReconcile Y  (m): {metrics.CorrY:0.000}" +
             $"\nLocal Grounded: {(metrics.LocalGrounded ? "Yes" : "No")}" +
