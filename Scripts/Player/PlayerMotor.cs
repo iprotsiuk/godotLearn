@@ -69,7 +69,17 @@ public static class PlayerMotor
 			velocity.Y -= config.Gravity * input.DtFixed;
 		}
 
-		bool allowSnap = wasGrounded && !jumpPressed && velocity.Y <= 0.0f;
+		bool hasSupportAhead = true;
+		if (wasGrounded && config.FloorSnapLength > 0.0f)
+		{
+			// Predict support under the next horizontal step to avoid one-tick ledge reattachment.
+			Vector3 horizontalAdvance = new(velocity.X * input.DtFixed, 0.0f, velocity.Z * input.DtFixed);
+			Transform3D supportProbeFrom = body.GlobalTransform.Translated(horizontalAdvance);
+			Vector3 supportProbeMotion = Vector3.Down * (config.FloorSnapLength + 0.05f);
+			hasSupportAhead = body.TestMove(supportProbeFrom, supportProbeMotion);
+		}
+
+		bool allowSnap = wasGrounded && !jumpPressed && velocity.Y <= 0.0f && hasSupportAhead;
 		body.FloorSnapLength = allowSnap ? config.FloorSnapLength : 0.0f;
 
 		body.Velocity = velocity;
