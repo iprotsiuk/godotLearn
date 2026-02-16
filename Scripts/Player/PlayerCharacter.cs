@@ -44,6 +44,9 @@ public partial class PlayerCharacter : CharacterBody3D
 	public bool CanJump => !_jumpLocked;
 
 	public Camera3D? LocalCamera => _camera;
+	public Vector3 RenderCorrectionOffset => _renderOffset;
+	public Vector3 ViewCorrectionOffset => _viewOffset;
+	public Vector3 CameraCorrectionOffset => _camera is null ? Vector3.Zero : _cameraYawRoot.Position;
 
 	public void Setup(int peerId, bool withCamera, Color tint)
 	{
@@ -157,7 +160,6 @@ public partial class PlayerCharacter : CharacterBody3D
 		{
 			_viewOffset = Vector3.Zero;
 			_viewVelocity = Vector3.Zero;
-			_cameraYawRoot.Position = Vector3.Zero;
 		}
 		else
 		{
@@ -169,8 +171,10 @@ public partial class PlayerCharacter : CharacterBody3D
 				MaxCorrectionSpeed,
 				dt);
 			_viewOffset = ClampStep(_viewOffset, next, MaxCorrectionStepPerFrame);
-			_cameraYawRoot.Position = _viewOffset;
 		}
+
+		// Keep local camera aligned with the same smoothed XZ render correction as the visual body.
+		_cameraYawRoot.Position = _renderOffset + _viewOffset;
 	}
 
 	public void SetLook(float yaw, float pitch)
@@ -219,7 +223,7 @@ public partial class PlayerCharacter : CharacterBody3D
 		_viewVelocity = Vector3.Zero;
 		if (_camera is not null)
 		{
-			_cameraYawRoot.Position = Vector3.Zero;
+			_cameraYawRoot.Position = _renderOffset;
 		}
 	}
 

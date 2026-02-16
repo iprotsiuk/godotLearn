@@ -353,11 +353,17 @@ public partial class NetSession
         _lastCorrectionYMeters = corrY;
         _lastCorrection3DMeters = corr3D;
         _lastCorrectionMeters = corr3D;
+        if (corr3D > 0.0005f)
+        {
+            _correctionRateWindowCount++;
+        }
 
         Vector3 renderOffset = new(correctionDelta.X, 0.0f, correctionDelta.Z);
-        if (corrXZ > _config.ReconciliationSnapThreshold)
+        bool hardSnapXZ = corrXZ > _config.ReconciliationSnapThreshold;
+        if (hardSnapXZ)
         {
             _localCharacter.ClearRenderCorrection();
+            _localCharacter.ClearViewCorrection();
         }
         else
         {
@@ -365,7 +371,7 @@ public partial class NetSession
         }
 
         Vector3 viewOffset = new(0.0f, correctionDelta.Y, 0.0f);
-        if (corrY > 0.5f)
+        if (hardSnapXZ || corrY > 0.5f)
         {
             _localCharacter.ClearViewCorrection();
         }

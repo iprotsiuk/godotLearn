@@ -208,6 +208,7 @@ public partial class NetSession
         }
 
         UpdateDropFutureRate(Time.GetTicksMsec() / 1000.0);
+        UpdateCorrectionRate(Time.GetTicksMsec() / 1000.0);
 
         float rttMs = _rttMs;
         float jitterMs = _jitterMs;
@@ -249,6 +250,9 @@ public partial class NetSession
         }
 
         int inputDelayTicksMetric = IsClient ? _appliedInputDelayTicks : _config.ServerInputDelayTicks;
+        Vector3 renderCorrectionOffset = _localCharacter?.RenderCorrectionOffset ?? Vector3.Zero;
+        Vector3 viewCorrectionOffset = _localCharacter?.ViewCorrectionOffset ?? Vector3.Zero;
+        Vector3 cameraCorrectionOffset = _localCharacter?.CameraCorrectionOffset ?? Vector3.Zero;
         Metrics = new SessionMetrics
         {
             FramesPerSecond = (float)Engine.GetFramesPerSecond(),
@@ -261,6 +265,10 @@ public partial class NetSession
             CorrXZ = _lastCorrectionXZMeters,
             CorrY = _lastCorrectionYMeters,
             Corr3D = _lastCorrection3DMeters,
+            CorrectionsPerSec = _correctionsPerSec,
+            RenderCorrectionOffset = renderCorrectionOffset,
+            ViewCorrectionOffset = viewCorrectionOffset,
+            CameraCorrectionOffset = cameraCorrectionOffset,
             RttMs = rttMs,
             JitterMs = jitterMs,
             LocalGrounded = _localCharacter?.Grounded ?? false,
@@ -314,5 +322,34 @@ public partial class NetSession
         _dropFutureRatePerSec = windowSec > 0.001 ? (float)(delta / windowSec) : 0.0f;
         _dropFutureRateWindowStartSec = nowSec;
         _dropFutureRateWindowCount = _serverDroppedFutureInputCount;
+    }
+
+    private void UpdateCorrectionRate(double nowSec)
+    {
+        if (!IsClient)
+        {
+            _correctionsPerSec = 0.0f;
+            _correctionRateWindowStartSec = nowSec;
+            _correctionRateWindowCount = 0;
+            return;
+        }
+
+        if (_correctionRateWindowStartSec <= 0.0)
+        {
+            _correctionRateWindowStartSec = nowSec;
+            _correctionRateWindowCount = 0;
+            _correctionsPerSec = 0.0f;
+            return;
+        }
+
+        double elapsed = nowSec - _correctionRateWindowStartSec;
+        if (elapsed < 1.0)
+        {
+            return;
+        }
+
+        _correctionsPerSec = elapsed > 0.001 ? (float)(_correctionRateWindowCount / elapsed) : 0.0f;
+        _correctionRateWindowStartSec = nowSec;
+        _correctionRateWindowCount = 0;
     }
 }

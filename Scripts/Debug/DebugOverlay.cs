@@ -163,8 +163,13 @@ public partial class DebugOverlay : CanvasLayer
             $"\nDropFuture Rate (5s): {metrics.DropFutureRatePerSec:0.00}/s" +
             $"\nRESYNC Triggered/Count: {(metrics.ResyncTriggered ? "Yes" : "No")} / {metrics.ResyncCount}" +
             $"\nJump Repeat Left: {metrics.JumpRepeatRemaining}" +
+            $"\nCorrections/sec: {metrics.CorrectionsPerSec:0.00}" +
             $"\nNet Correction Magnitude (3D m): {metrics.Corr3D:0.000}" +
             $"\nLast Correction XZ/Y/3D (m): {metrics.CorrXZ:0.000} / {metrics.CorrY:0.000} / {metrics.Corr3D:0.000}" +
+            $"\nRender/View/Camera Offset (mm): " +
+            $"{metrics.RenderCorrectionOffset.X * 1000.0f:0.0},{metrics.RenderCorrectionOffset.Y * 1000.0f:0.0},{metrics.RenderCorrectionOffset.Z * 1000.0f:0.0} / " +
+            $"{metrics.ViewCorrectionOffset.X * 1000.0f:0.0},{metrics.ViewCorrectionOffset.Y * 1000.0f:0.0},{metrics.ViewCorrectionOffset.Z * 1000.0f:0.0} / " +
+            $"{metrics.CameraCorrectionOffset.X * 1000.0f:0.0},{metrics.CameraCorrectionOffset.Y * 1000.0f:0.0},{metrics.CameraCorrectionOffset.Z * 1000.0f:0.0}" +
             $"\nLocal Grounded: {(metrics.LocalGrounded ? "Yes" : "No")}" +
             $"\nMoveSpeed/GroundAccel: {metrics.MoveSpeed:0.###} / {metrics.GroundAcceleration:0.###}" +
             $"\nServerInputDelayTicks: {metrics.ServerInputDelayTicks}" +

@@ -93,6 +93,10 @@ public struct SessionMetrics
     public float CorrXZ;
     public float CorrY;
     public float Corr3D;
+    public float CorrectionsPerSec;
+    public Vector3 RenderCorrectionOffset;
+    public Vector3 ViewCorrectionOffset;
+    public Vector3 CameraCorrectionOffset;
     public float RttMs;
     public float JitterMs;
     public bool LocalGrounded;

@@ -118,6 +118,9 @@ public partial class NetSession : Node
     private float _lastCorrectionXZMeters;
     private float _lastCorrectionYMeters;
     private float _lastCorrection3DMeters;
+    private float _correctionsPerSec;
+    private double _correctionRateWindowStartSec;
+    private uint _correctionRateWindowCount;
     private float _rttMs;
     private float _jitterMs;
     private bool _logControlPackets;
@@ -409,6 +412,9 @@ public partial class NetSession : Node
         _lastCorrectionXZMeters = 0.0f;
         _lastCorrectionYMeters = 0.0f;
         _lastCorrection3DMeters = 0.0f;
+        _correctionsPerSec = 0.0f;
+        _correctionRateWindowStartSec = 0.0;
+        _correctionRateWindowCount = 0;
         _rttMs = 0.0f;
         _jitterMs = 0.0f;
         _dynamicInterpolationDelayMs = 0.0f;
