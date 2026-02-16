@@ -140,10 +140,10 @@ public partial class DebugOverlay : CanvasLayer
 
         _statsLabel.Text =
             $"Role: {(isServer ? "Server" : "")}{(isServer && isClient ? "/" : "")}{(isClient ? "Client" : "")}" +
-            $"\nServer Tick: {metrics.ServerTick}" +
-            $"\nClient Tick: {metrics.ClientTick}" +
+            $"\nServer Sim Tick: {metrics.ServerSimTick}" +
+            $"\nClient Est Server Tick: {metrics.ClientEstServerTick}" +
             $"\nTick Error: {metrics.TickErrorTicks}" +
-            $"\nSend Tick: {metrics.SendTick}" +
+            $"\nClient Send Tick: {metrics.ClientSendTick}" +
             $"\nRTT: {rttText}" +
             $"\nJitter: {jitterText}" +
             $"\nGlobal Interp Delay: {interpDelayText}" +

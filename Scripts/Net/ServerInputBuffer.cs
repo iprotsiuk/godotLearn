@@ -39,4 +39,39 @@ public sealed class ServerInputBuffer
         command = default;
         return false;
     }
+
+    public bool TryGetBufferedTickRange(out uint minTick, out uint maxTick)
+    {
+        bool found = false;
+        minTick = 0;
+        maxTick = 0;
+        for (int i = 0; i < Capacity; i++)
+        {
+            if (!_valid[i])
+            {
+                continue;
+            }
+
+            uint tick = _commands[i].InputTick;
+            if (!found)
+            {
+                minTick = tick;
+                maxTick = tick;
+                found = true;
+                continue;
+            }
+
+            if (tick < minTick)
+            {
+                minTick = tick;
+            }
+
+            if (tick > maxTick)
+            {
+                maxTick = tick;
+            }
+        }
+
+        return found;
+    }
 }

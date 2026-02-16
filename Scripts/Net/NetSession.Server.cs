@@ -7,6 +7,64 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private static void RecordUsageWindow(ServerPlayer player, byte mode)
+    {
+        if (player.UsageWindowCount == player.UsageWindow.Length)
+        {
+            byte outgoing = player.UsageWindow[player.UsageWindowWriteIndex];
+            switch (outgoing)
+            {
+                case 0:
+                    player.UsageWindowBuffered--;
+                    break;
+                case 1:
+                    player.UsageWindowHold--;
+                    break;
+                default:
+                    player.UsageWindowNeutral--;
+                    break;
+            }
+        }
+        else
+        {
+            player.UsageWindowCount++;
+        }
+
+        player.UsageWindow[player.UsageWindowWriteIndex] = mode;
+        player.UsageWindowWriteIndex = (player.UsageWindowWriteIndex + 1) % player.UsageWindow.Length;
+        switch (mode)
+        {
+            case 0:
+                player.UsageWindowBuffered++;
+                break;
+            case 1:
+                player.UsageWindowHold++;
+                break;
+            default:
+                player.UsageWindowNeutral++;
+                break;
+        }
+    }
+
+    private void LogJoinDiagnosticsIfDue(int peerId, ServerPlayer player, double nowSec)
+    {
+        if (nowSec > player.JoinDiagUntilSec || nowSec < player.NextJoinDiagAtSec)
+        {
+            return;
+        }
+
+        bool hasRange = player.Inputs.TryGetBufferedTickRange(out uint minTickBuffered, out uint maxTickBuffered);
+        int bufferDepth = hasRange ? (int)maxTickBuffered - (int)_server_sim_tick : 0;
+        string minTickText = hasRange ? minTickBuffered.ToString() : "none";
+        string maxTickText = hasRange ? maxTickBuffered.ToString() : "none";
+        GD.Print(
+            $"ServerJoinDiag: peer={peerId} server_sim_tick={_server_sim_tick} delayTicks={player.EffectiveInputDelayTicks} " +
+            $"min_tick_buffered={minTickText} max_tick_buffered={maxTickText} buffer_depth={bufferDepth} " +
+            $"missingStreakCurrent={player.MissingInputStreakCurrent} " +
+            $"window120(buffered/hold/neutral)={player.UsageWindowBuffered}/{player.UsageWindowHold}/{player.UsageWindowNeutral}");
+        player.NextJoinDiagAtSec = nowSec + 0.1;
+    }
+
     private static void IncrementMissingInputStreak(ServerPlayer player)
     {
         player.MissingInputStreakCurrent++;
@@ -37,7 +95,8 @@ public partial class NetSession
                 $"ServerWANDiag: peer={peerId} delayTicks={player.EffectiveInputDelayTicks} rtt={player.RttMs:0.0}ms jitter={player.JitterMs:0.0}ms " +
                 $"drops(old/future)={player.DroppedOldInputCount}/{player.DroppedFutureInputCount} " +
                 $"usage(buffered/hold/neutral)={player.TicksUsedBufferedInput}/{player.TicksUsedHoldLast}/{player.TicksUsedNeutral} bufferedPct={bufferedPct:0.0}% " +
-                $"missingStreak(cur/max)={player.MissingInputStreakCurrent}/{player.MissingInputStreakMax}");
+                $"missingStreak(cur/max)={player.MissingInputStreakCurrent}/{player.MissingInputStreakMax} " +
+                $"window120(buffered/hold/neutral)={player.UsageWindowBuffered}/{player.UsageWindowHold}/{player.UsageWindowNeutral}");
         }
     }
 
@@ -78,6 +137,10 @@ public partial class NetSession
             targetDelayTicks,
             NetConstants.MinWanInputDelayTicks,
             Mathf.Min(NetConstants.MaxWanInputDelayTicks, Mathf.Max(0, NetConstants.MaxFutureInputTicks - 2)));
+        if (nowSec < player.JoinDelayGraceUntilSec && targetDelayTicks < currentDelayTicks)
+        {
+            targetDelayTicks = currentDelayTicks;
+        }
 
         if (nowSec < player.NextDelayUpdateAtSec)
         {
@@ -133,7 +196,7 @@ public partial class NetSession
         player.MissingInputTicks = 0;
         player.PendingSafetyNeutralTicks = 1;
         UpdateEffectiveInputDelayForPeer(peerId, player, sendDelayUpdate: false);
-        uint neededTick = _serverTick + 1;
+        uint neededTick = _server_sim_tick + 1;
         player.LastInput = BuildNeutralInput(player.LastInput, neededTick, 1.0f / _config.ServerTickRate, player.CurrentInputEpoch);
     }
 
@@ -193,7 +256,7 @@ public partial class NetSession
 
     private void TickServer(float delta)
     {
-        _serverTick++;
+        _server_sim_tick++;
 
         float fixedDt = 1.0f / _config.ServerTickRate;
         double nowSec = Time.GetTicksMsec() / 1000.0;
@@ -205,7 +268,7 @@ public partial class NetSession
             UpdateEffectiveInputDelayForPeer(peerId, player, sendDelayUpdate: true, nowSec);
             SendServerPingIfDue(peerId, player, nowSec);
 
-            uint neededTick = _serverTick;
+            uint neededTick = _server_sim_tick;
             InputCommand command;
             bool usedBufferedInput = false;
             bool usedHoldLast = false;
@@ -251,16 +314,19 @@ public partial class NetSession
             {
                 player.TicksUsedBufferedInput++;
                 player.MissingInputStreakCurrent = 0;
+                RecordUsageWindow(player, 0);
             }
             else if (usedHoldLast)
             {
                 player.TicksUsedHoldLast++;
                 IncrementMissingInputStreak(player);
+                RecordUsageWindow(player, 1);
             }
             else if (usedNeutral)
             {
                 player.TicksUsedNeutral++;
                 IncrementMissingInputStreak(player);
+                RecordUsageWindow(player, 2);
             }
 
             if (!usedBufferedInput)
@@ -272,25 +338,28 @@ public partial class NetSession
                 nowSec >= player.NextResyncHintAtSec &&
                 !(_mode == RunMode.ListenServer && peerId == _localPeerId))
             {
-                NetCodec.WriteControlResyncHint(_controlPacket, _serverTick);
+                NetCodec.WriteControlResyncHint(_controlPacket, _server_sim_tick);
                 SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
                 player.NextResyncHintAtSec = nowSec + 0.5;
             }
 
+            // Fire convention: evaluate at END of tick T, after applying view + movement for input tick T.
             player.Character.SetLook(command.Yaw, command.Pitch);
             PlayerMotor.Simulate(player.Character, command, _config);
+            ProcessFireFromInputCommand(peerId, player, command);
+            LogJoinDiagnosticsIfDue(peerId, player, nowSec);
         }
 
         LogServerDiagnosticsIfDue(nowSec);
-        RecordRewindFrame(_serverTick);
+        RecordRewindFrame(_server_sim_tick);
 
-        if ((_serverTick % (uint)_snapshotEveryTicks) != 0)
+        if ((_server_sim_tick % (uint)_snapshotEveryTicks) != 0)
         {
             return;
         }
 
         int stateCount = BuildSnapshotStates();
-        NetCodec.WriteSnapshot(_snapshotPacket, _serverTick, _snapshotSendScratch.AsSpan(0, stateCount));
+        NetCodec.WriteSnapshot(_snapshotPacket, _server_sim_tick, _snapshotSendScratch.AsSpan(0, stateCount));
 
         foreach (int targetPeer in _serverPlayers.Keys)
         {
@@ -374,15 +443,15 @@ public partial class NetSession
                 ResetPeerForEpoch(fromPeer, serverPlayer, command.InputEpoch);
             }
 
-            uint maxFutureInputTick = _serverTick + (uint)NetConstants.MaxFutureInputTicks;
+            uint maxFutureInputTick = _server_sim_tick + (uint)NetConstants.MaxFutureInputTicks;
             if (command.InputTick > maxFutureInputTick)
             {
                 serverPlayer.DroppedFutureInputCount++;
                 continue;
             }
 
-            uint minAllowedTick = _serverTick > (uint)NetConstants.MaxPastInputTicks
-                ? _serverTick - (uint)NetConstants.MaxPastInputTicks
+            uint minAllowedTick = _server_sim_tick > (uint)NetConstants.MaxPastInputTicks
+                ? _server_sim_tick - (uint)NetConstants.MaxPastInputTicks
                 : 0;
             if (command.InputTick < minAllowedTick)
             {

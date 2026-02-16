@@ -8,7 +8,8 @@ public enum InputButtons : byte
 {
     None = 0,
     JumpPressed = 1 << 0,
-    JumpHeld = 1 << 1
+    JumpHeld = 1 << 1,
+    FirePressed = 1 << 2
 }
 
 public struct InputCommand
@@ -82,8 +83,8 @@ public struct FireVisual
 
 public struct SessionMetrics
 {
-    public uint ServerTick;
-    public uint ClientTick;
+    public uint ServerSimTick;
+    public uint ClientEstServerTick;
     public uint LastAckedInput;
     public int PendingInputCount;
     public int JumpRepeatRemaining;
@@ -104,7 +105,7 @@ public struct SessionMetrics
     public float DynamicInterpolationDelayMs;
     public float SessionJitterEstimateMs;
     public int TickErrorTicks;
-    public uint SendTick;
+    public uint ClientSendTick;
     public float DropFutureRatePerSec;
     public int PendingInputsCap;
     public bool ResyncTriggered;

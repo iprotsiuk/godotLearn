@@ -37,7 +37,7 @@ public partial class NetSession
                     NetCodec.WriteControlWelcome(
                         _controlPacket,
                         fromPeer,
-                        _serverTick,
+                        _server_sim_tick,
                         _config.ServerTickRate,
                         _config.ClientTickRate,
                         _config.SnapshotRate,
@@ -61,7 +61,7 @@ public partial class NetSession
                 case ControlType.Ping:
                     ushort pingSeq = NetCodec.ReadControlPingSeq(packet);
                     uint clientTime = NetCodec.ReadControlClientTime(packet);
-                    NetCodec.WriteControlPong(_controlPacket, pingSeq, clientTime, _serverTick);
+                    NetCodec.WriteControlPong(_controlPacket, pingSeq, clientTime, _server_sim_tick);
                     SendPacket(fromPeer, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
                     break;
                 case ControlType.Pong:
@@ -109,25 +109,32 @@ public partial class NetSession
                 _targetInputDelayTicks = _config.ServerInputDelayTicks;
                 _config.FloorSnapLength = Mathf.Clamp(NetCodec.ReadControlFloorSnapLength(packet), 0.0f, 2.0f);
                 _config.GroundStickVelocity = Mathf.Min(NetCodec.ReadControlGroundStickVelocity(packet), -0.01f);
-                _serverTick = NetCodec.ReadControlWelcomeServerTick(packet);
-                _lastAuthoritativeServerTick = _serverTick;
+                _server_sim_tick = NetCodec.ReadControlWelcomeServerTick(packet);
+                _lastAuthoritativeServerTick = _server_sim_tick;
                 GD.Print(
                     $"Welcome applied: MoveSpeed={_config.MoveSpeed:0.###}, GroundAccel={_config.GroundAcceleration:0.###}, InputDelayTicks={_config.ServerInputDelayTicks}");
                 _netClock = new NetClock(_config.ServerTickRate);
-                _netClock.ObserveServerTick(_serverTick, (long)Time.GetTicksUsec());
+                _netClock.ObserveServerTick(_server_sim_tick, (long)Time.GetTicksUsec());
                 RebaseClientTickToServerEstimate();
                 double welcomeNowSec = Time.GetTicksMsec() / 1000.0;
-                _joinDelaySmoothUntilSec = welcomeNowSec + 2.0;
+                _joinInitialInputDelayTicks = _appliedInputDelayTicks;
+                _joinDelayGraceUntilSec = welcomeNowSec + 2.0;
                 _delayTicksNextApplyAtSec = welcomeNowSec;
-                _warmupBurstTicksRemaining = Mathf.Max(0, _appliedInputDelayTicks + 2);
-                _pendingWarmupBurst = _warmupBurstTicksRemaining > 0;
+                _clientJoinDiagUntilSec = welcomeNowSec + 3.0;
+                _clientNextJoinDiagAtSec = welcomeNowSec;
+                _clientInputCmdsSentSinceLastDiag = 0;
+                uint desired_horizon_tick = GetDesiredHorizonTick();
+                int warmupSent = SendInputsUpToDesiredHorizon(desired_horizon_tick, allowPrediction: false);
+                _clientInputCmdsSentSinceLastDiag += warmupSent;
+                GD.Print(
+                    $"NetSession: Warmup input burst complete. sent={warmupSent} client_send_tick={_client_send_tick} desired_horizon_tick={desired_horizon_tick}");
                 _welcomeReceived = true;
                 TrySpawnLocalCharacter();
                 break;
             case ControlType.Ping:
                 ushort pingSeq = NetCodec.ReadControlPingSeq(packet);
                 uint senderTime = NetCodec.ReadControlClientTime(packet);
-                NetCodec.WriteControlPong(_controlPacket, pingSeq, senderTime, _serverTick);
+                NetCodec.WriteControlPong(_controlPacket, pingSeq, senderTime, _server_sim_tick);
                 SendPacket(1, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
                 break;
             case ControlType.Pong:
@@ -150,7 +157,7 @@ public partial class NetSession
                     }
 
                     uint serverTick = NetCodec.ReadControlServerTick(packet);
-                    _serverTick = serverTick;
+                    _server_sim_tick = serverTick;
                     _lastAuthoritativeServerTick = serverTick;
                     _netClock?.ObserveServerTick(serverTick, (long)Time.GetTicksUsec());
                 }
@@ -169,7 +176,7 @@ public partial class NetSession
                 break;
             case ControlType.ResyncHint:
                 uint hintServerTick = NetCodec.ReadControlResyncHintTick(packet);
-                _serverTick = hintServerTick;
+                _server_sim_tick = hintServerTick;
                 _lastAuthoritativeServerTick = hintServerTick;
                 _netClock?.ObserveServerTick(hintServerTick, (long)Time.GetTicksUsec());
                 TriggerClientResync("server_resync_hint", hintServerTick);

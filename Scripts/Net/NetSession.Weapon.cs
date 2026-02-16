@@ -27,55 +27,6 @@ public partial class NetSession
 	private ColorRect? _damageIndicatorRect;
 	private double _damageIndicatorExpireAtSec;
 
-	private void TryFireWeapon()
-	{
-		if (!IsClient || _localCharacter is null)
-		{
-			return;
-		}
-
-		if (_mode == RunMode.Client && _localPeerId == 0)
-		{
-			return;
-		}
-
-		Vector3 aimDir = YawPitchToDirection(_lookYaw, _lookPitch).Normalized();
-		int interpDelayTicks = GetGlobalInterpolationDelayTicks();
-		uint fireTick = GetEstimatedServerTickNow();
-
-		float globalInterpDelayMs = TicksToMs(interpDelayTicks);
-		FireRequest request = new()
-		{
-			FireSeq = ++_nextFireSeq,
-			FireTick = fireTick,
-			InputEpoch = _inputEpoch,
-			InterpDelayTicksUsed = interpDelayTicks,
-			AimDirection = aimDir
-		};
-		uint targetTick = fireTick > (uint)interpDelayTicks ? fireTick - (uint)interpDelayTicks : 0;
-		GD.Print($"FireRequest: peer={_localPeerId} seq={request.FireSeq} fireTick={fireTick} targetTick={targetTick} delayMs={globalInterpDelayMs:0.0} epoch={request.InputEpoch}");
-
-		NetCodec.WriteFire(_firePacket, request);
-		if (_mode == RunMode.ListenServer)
-		{
-			HandleFire(_localPeerId, _firePacket);
-		}
-		else
-		{
-			SendPacket(1, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _firePacket);
-		}
-	}
-
-	private int GetGlobalInterpolationDelayTicks()
-	{
-		if (_globalInterpDelayTicks > 0)
-		{
-			return _globalInterpDelayTicks;
-		}
-
-		return MsToTicks(Mathf.Max(0.0f, _config.InterpolationDelayMs));
-	}
-
 	private void HandleFire(int fromPeer, byte[] packet)
 	{
 		if (!IsServer)
@@ -83,109 +34,101 @@ public partial class NetSession
 			return;
 		}
 
-		GD.Print($"FireRecv: fromPeer={fromPeer} bytes={packet.Length} serverTick={_serverTick}");
-
-		if (!_serverPlayers.TryGetValue(fromPeer, out ServerPlayer? shooter))
-		{
-			ServerPeerConnected(fromPeer);
-			if (!_serverPlayers.TryGetValue(fromPeer, out shooter))
-			{
-				GD.Print($"FireReject: no server player for peer={fromPeer}");
-				return;
-			}
-		}
-
+		// Keep legacy decode path for compatibility while authoritative fire comes from InputCommand.
 		if (!NetCodec.TryReadFire(packet, out FireRequest request))
 		{
-			GD.Print($"FireReject: decode failed for peer={fromPeer}");
 			return;
 		}
 
-		if (request.InputEpoch != shooter.CurrentInputEpoch)
+		GD.Print(
+			$"FireLegacyIgnored: peer={fromPeer} fireTick={request.FireTick} seq={request.FireSeq} " +
+			$"reason=fire_integrated_into_input_command");
+	}
+
+	private void ProcessFireFromInputCommand(int shooterPeerId, ServerPlayer shooter, in InputCommand command)
+	{
+		if ((command.Buttons & InputButtons.FirePressed) == 0)
 		{
-			GD.Print($"FireReject: epoch mismatch peer={fromPeer} reqEpoch={request.InputEpoch} curEpoch={shooter.CurrentInputEpoch}");
 			return;
 		}
 
-		if (request.FireSeq <= shooter.LastProcessedFireSeq)
-		{
-			return;
-		}
-		shooter.LastProcessedFireSeq = request.FireSeq;
-
-		uint oldestTick = _serverTick > (uint)(RewindHistoryTicks - 1)
-			? _serverTick - (uint)(RewindHistoryTicks - 1)
+		uint fireTick = command.InputTick;
+		uint oldestTick = _server_sim_tick > (uint)(RewindHistoryTicks - 1)
+			? _server_sim_tick - (uint)(RewindHistoryTicks - 1)
 			: 0;
-		if (request.FireTick > _serverTick)
-		{
-			GD.Print($"FireReject: future fireTick={request.FireTick} serverTick={_serverTick}");
-			return;
-		}
-		if (request.FireTick < oldestTick)
-		{
-			GD.Print($"FireReject: stale fireTick={request.FireTick} oldest={oldestTick} serverTick={_serverTick}");
-			return;
-		}
-
-		int interpDelayTicks = Mathf.Clamp(request.InterpDelayTicksUsed, 0, RewindHistoryTicks - 1);
-		uint targetTick = request.FireTick > (uint)interpDelayTicks
-			? request.FireTick - (uint)interpDelayTicks
+		int interpDelayTicks = Mathf.Clamp(MsToTicks(Mathf.Max(0.0f, _config.InterpolationDelayMs)), 0, RewindHistoryTicks - 1);
+		uint targetTick = fireTick > (uint)interpDelayTicks
+			? fireTick - (uint)interpDelayTicks
 			: 0;
 		if (targetTick < oldestTick)
 		{
 			targetTick = oldestTick;
 		}
 
-		Vector3 direction = request.AimDirection;
-		if (direction.LengthSquared() <= 0.000001f)
-		{
-			return;
-		}
+		// Aim direction is world-space and derived from the same yaw/pitch sampled for fireTick.
+		Vector3 rayDirection = YawPitchToDirection(command.Yaw, command.Pitch).Normalized();
+		Vector3 viewAtTickDirection = YawPitchToDirection(command.Yaw, command.Pitch).Normalized();
+		float angleDiffDeg = Mathf.RadToDeg(Mathf.Acos(Mathf.Clamp(viewAtTickDirection.Dot(rayDirection), -1.0f, 1.0f)));
 
-		direction = direction.Normalized();
 		Vector3 shooterPosAtFire = shooter.Character.GlobalPosition;
-		TryGetHistoricalPosition(fromPeer, request.FireTick, out shooterPosAtFire);
-		Vector3 shooterPosNow = shooter.Character.GlobalPosition;
-		Vector3 shooterPosUsed = shooterPosAtFire;
-		Vector3 origin = shooterPosUsed + new Vector3(0.0f, 1.55f, 0.0f);
+		TryGetHistoricalPosition(shooterPeerId, fireTick, out shooterPosAtFire);
+		Vector3 origin = ClampShotOrigin(shooterPeerId, fireTick, shooterPosAtFire + new Vector3(0.0f, 1.55f, 0.0f));
 
 		int hitPeer = -1;
-		Vector3 hitPoint = origin + (direction * WeaponMaxRange);
-		if (TryFindRayHitAtTick(fromPeer, targetTick, origin, direction, out int foundPeer, out Vector3 foundPoint))
+		Vector3 hitPoint = origin + (rayDirection * WeaponMaxRange);
+		if (TryFindRayHitAtTick(shooterPeerId, targetTick, origin, rayDirection, out int foundPeer, out Vector3 foundPoint))
 		{
 			hitPeer = foundPeer;
 			hitPoint = foundPoint;
 		}
 
-		float shooterNowVsFire = shooterPosNow.DistanceTo(shooterPosAtFire);
-		float shooterUsedVsFire = shooterPosUsed.DistanceTo(shooterPosAtFire);
+		int tickAlignment = (int)_server_sim_tick - (int)fireTick;
 		GD.Print(
-			$"FireEval: serverTick={_serverTick} fireTick={request.FireTick} targetTick={targetTick} " +
-			$"shooterNowDelta={shooterNowVsFire:0.###} shooterUsedDelta={shooterUsedVsFire:0.###}");
+			$"FireEval: serverTick={_server_sim_tick} fireTick={fireTick} targetTick={targetTick} " +
+			$"tick_alignment={tickAlignment} angle_diff_deg={angleDiffDeg:0.###}");
+
+		if (hitPeer < 0 &&
+			TryComputeClosestApproachAtTick(
+				shooterPeerId,
+				command.Yaw,
+				targetTick,
+				origin,
+				rayDirection,
+				out int closestPeer,
+				out float closestDist,
+				out float signedLateralError))
+		{
+			Vector3 shooterVelocityAtFire = shooter.Character.Velocity;
+			GD.Print(
+				$"FireBiasDiag: shooter={shooterPeerId} nearest={closestPeer} tick={fireTick} " +
+				$"shooter_velocity={shooterVelocityAtFire} closest_approach={closestDist:0.###} signed_lateral_error={signedLateralError:0.###}");
+		}
 
 		FireResult result = new()
 		{
-			ShooterPeerId = fromPeer,
+			ShooterPeerId = shooterPeerId,
 			HitPeerId = hitPeer,
 			ValidatedServerTick = targetTick
 		};
 		if (hitPeer >= 0)
 		{
-			GD.Print($"ServerHit: shooter={fromPeer} target={hitPeer} fireTick={request.FireTick} targetTick={targetTick}");
+			GD.Print($"ServerHit: shooter={shooterPeerId} target={hitPeer} fireTick={fireTick} targetTick={targetTick}");
 		}
 		else
 		{
-			GD.Print($"ServerMiss: shooter={fromPeer} fireTick={request.FireTick} targetTick={targetTick}");
+			GD.Print($"ServerMiss: shooter={shooterPeerId} fireTick={fireTick} targetTick={targetTick}");
 		}
+
 		NetCodec.WriteFireResult(_fireResultPacket, result);
 		BroadcastFireResult(_fireResultPacket);
+
 		FireVisual visual = new()
 		{
-			ShooterPeerId = fromPeer,
+			ShooterPeerId = shooterPeerId,
 			ValidatedServerTick = targetTick,
 			Origin = origin,
-			Yaw = DirectionToYaw(direction),
-			Pitch = DirectionToPitch(direction),
+			Yaw = DirectionToYaw(rayDirection),
+			Pitch = DirectionToPitch(rayDirection),
 			HitPoint = hitPoint,
 			DidHit = hitPeer >= 0
 		};
@@ -281,22 +224,22 @@ public partial class NetSession
 
 	private uint ClampRewindTick(uint requestedTick)
 	{
-		if (_serverTick == 0)
+		if (_server_sim_tick == 0)
 		{
 			return 0;
 		}
 
-		uint oldestTick = _serverTick > (uint)(RewindHistoryTicks - 1)
-			? _serverTick - (uint)(RewindHistoryTicks - 1)
+		uint oldestTick = _server_sim_tick > (uint)(RewindHistoryTicks - 1)
+			? _server_sim_tick - (uint)(RewindHistoryTicks - 1)
 			: 0;
 		if (requestedTick < oldestTick)
 		{
 			return oldestTick;
 		}
 
-		if (requestedTick > _serverTick)
+		if (requestedTick > _server_sim_tick)
 		{
-			return _serverTick;
+			return _server_sim_tick;
 		}
 
 		return requestedTick;
@@ -399,6 +342,49 @@ public partial class NetSession
 		return hitPeerId >= 0;
 	}
 
+	private bool TryComputeClosestApproachAtTick(
+		int shooterPeerId,
+		float shooterYawAtFireTick,
+		uint tick,
+		Vector3 origin,
+		Vector3 direction,
+		out int closestPeerId,
+		out float closestDistance,
+		out float signedLateralError)
+	{
+		closestPeerId = -1;
+		closestDistance = float.MaxValue;
+		signedLateralError = 0.0f;
+
+		Vector3 shooterRight = new Vector3(Mathf.Cos(shooterYawAtFireTick), 0.0f, -Mathf.Sin(shooterYawAtFireTick)).Normalized();
+		foreach (KeyValuePair<int, ServerPlayer> pair in _serverPlayers)
+		{
+			int peerId = pair.Key;
+			if (peerId == shooterPeerId)
+			{
+				continue;
+			}
+
+			Vector3 targetPos = pair.Value.Character.GlobalPosition;
+			TryGetHistoricalPosition(peerId, tick, out targetPos);
+			Vector3 center = targetPos + new Vector3(0.0f, 0.9f, 0.0f);
+			float t = Mathf.Clamp((center - origin).Dot(direction), 0.0f, WeaponMaxRange);
+			Vector3 closestPoint = origin + (direction * t);
+			Vector3 delta = center - closestPoint;
+			float dist = delta.Length();
+			if (dist >= closestDistance)
+			{
+				continue;
+			}
+
+			closestDistance = dist;
+			closestPeerId = peerId;
+			signedLateralError = delta.Dot(shooterRight);
+		}
+
+		return closestPeerId >= 0;
+	}
+
 	private bool TryGetHistoricalPosition(int peerId, uint tick, out Vector3 position)
 	{
 		if (TryGetRewindPosition(peerId, tick, out position))
@@ -406,8 +392,8 @@ public partial class NetSession
 			return true;
 		}
 
-		uint oldestTick = _serverTick > (uint)(RewindHistoryTicks - 1)
-			? _serverTick - (uint)(RewindHistoryTicks - 1)
+		uint oldestTick = _server_sim_tick > (uint)(RewindHistoryTicks - 1)
+			? _server_sim_tick - (uint)(RewindHistoryTicks - 1)
 			: 0;
 		for (uint scanTick = tick; scanTick >= oldestTick; scanTick--)
 		{

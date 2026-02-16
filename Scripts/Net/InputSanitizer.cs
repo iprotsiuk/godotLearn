@@ -5,7 +5,7 @@ namespace NetRunnerSlice.Net;
 
 public static class InputSanitizer
 {
-    private const InputButtons AllowedButtons = InputButtons.JumpHeld | InputButtons.JumpPressed;
+    private const InputButtons AllowedButtons = InputButtons.JumpHeld | InputButtons.JumpPressed | InputButtons.FirePressed;
 
     public static bool TrySanitizeServer(ref InputCommand command, NetworkConfig config)
     {

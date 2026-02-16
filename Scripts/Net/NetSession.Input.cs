@@ -12,6 +12,7 @@ public partial class NetSession
 
     private InputState _inputState;
     private int _jumpPressRepeatTicksRemaining;
+    private int _firePressRepeatTicksRemaining;
 
     public override void _Notification(int what)
     {
@@ -50,6 +51,11 @@ public partial class NetSession
         _jumpPressRepeatTicksRemaining = Mathf.Clamp(2, 1, NetConstants.MaxInputRedundancy);
     }
 
+    private void TryLatchFirePressed()
+    {
+        _firePressRepeatTicksRemaining = Mathf.Clamp(2, 1, NetConstants.MaxInputRedundancy);
+    }
+
     private void OnFocusOut()
     {
         _hasFocus = false;
@@ -80,10 +86,7 @@ public partial class NetSession
         _pendingInputs.Clear();
         _lastAckedSeq = _nextInputSeq;
         _jumpPressRepeatTicksRemaining = 0;
-        _lastSentInputTick = 0;
-        _lastStampedSendTick = 0;
-        _warmupBurstTicksRemaining = 0;
-        _pendingWarmupBurst = false;
+        _firePressRepeatTicksRemaining = 0;
         _localCharacter?.ClearRenderCorrection();
         _localCharacter?.ClearViewCorrection();
 

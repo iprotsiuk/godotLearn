@@ -9,6 +9,7 @@ public partial class NetSession : Node
 {
     private const int RewindHistoryTicks = 120;
     private const double ServerDiagnosticsLogIntervalSec = 2.0;
+    private const int ClientInputSafetyTicks = 2;
     private const float WeaponMaxRange = 200.0f;
     private const float WeaponTargetRadius = 0.5f;
     private const float WeaponOriginMaxOffset = 1.5f;
@@ -37,7 +38,6 @@ public partial class NetSession : Node
         public double NextDelayUpdateAtSec;
         public double NextResyncHintAtSec;
         public uint LastProcessedSeq;
-        public uint LastProcessedFireSeq;
         public InputCommand LastInput;
         public uint DroppedOldInputCount;
         public uint DroppedFutureInputCount;
@@ -46,6 +46,15 @@ public partial class NetSession : Node
         public uint TicksUsedNeutral;
         public uint MissingInputStreakCurrent;
         public uint MissingInputStreakMax;
+        public readonly byte[] UsageWindow = new byte[120];
+        public int UsageWindowWriteIndex;
+        public int UsageWindowCount;
+        public int UsageWindowBuffered;
+        public int UsageWindowHold;
+        public int UsageWindowNeutral;
+        public double JoinDelayGraceUntilSec;
+        public double JoinDiagUntilSec;
+        public double NextJoinDiagAtSec;
     }
 
     private sealed class RemoteEntity
@@ -63,7 +72,6 @@ public partial class NetSession : Node
     private readonly uint[] _rewindTicks = new uint[RewindHistoryTicks];
     private readonly int[] _rewindCounts = new int[RewindHistoryTicks];
     private readonly RewindSample[,] _rewindSamples = new RewindSample[RewindHistoryTicks, NetConstants.MaxPlayers];
-    private readonly byte[] _firePacket = new byte[NetConstants.FirePacketBytes];
     private readonly byte[] _fireResultPacket = new byte[NetConstants.FireResultPacketBytes];
     private readonly byte[] _fireVisualPacket = new byte[NetConstants.FireVisualPacketBytes];
     private readonly List<(PlayerCharacter Character, Vector3 Position)> _rewindRestoreScratch = new(NetConstants.MaxPlayers);
@@ -88,8 +96,12 @@ public partial class NetSession : Node
     private SceneMultiplayer? _sceneMultiplayer;
     private NetworkSimulator? _simulator;
     private NetClock? _netClock;
-    private uint _serverTick;
-    private uint _clientTick;
+    // Tick clock: server_sim_tick (authoritative simulation tick counter on server).
+    private uint _server_sim_tick;
+    // Tick clock: client_est_server_tick (client estimate of current server_sim_tick "now").
+    private uint _client_est_server_tick;
+    // Tick clock: client_send_tick (next tick index for generated/sent input commands).
+    private uint _client_send_tick;
     private uint _lastAuthoritativeServerTick;
     private int _localPeerId;
     private int _snapshotEveryTicks = 3;
@@ -122,16 +134,15 @@ public partial class NetSession : Node
     private bool _hasFocus = true;
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
-    private uint _nextFireSeq;
-    private uint _lastSentInputTick;
-    private uint _lastStampedSendTick;
     private uint _lastAckedSeq;
     private int _appliedInputDelayTicks;
     private int _targetInputDelayTicks;
     private double _delayTicksNextApplyAtSec;
-    private double _joinDelaySmoothUntilSec;
-    private int _warmupBurstTicksRemaining;
-    private bool _pendingWarmupBurst;
+    private double _joinDelayGraceUntilSec;
+    private int _joinInitialInputDelayTicks;
+    private double _clientJoinDiagUntilSec;
+    private double _clientNextJoinDiagAtSec;
+    private int _clientInputCmdsSentSinceLastDiag;
     private uint _inputEpoch = 1;
     private uint _serverDroppedOldInputCount;
     private uint _serverDroppedFutureInputCount;
@@ -277,7 +288,7 @@ public partial class NetSession : Node
         }
         if (@event.IsActionPressed("fire"))
         {
-            TryFireWeapon();
+            TryLatchFirePressed();
         }
 
         if (@event.IsActionPressed("quit"))
@@ -373,21 +384,21 @@ public partial class NetSession : Node
     public void StopSession()
     {
         _mode = RunMode.None;
-        _serverTick = 0;
+        _server_sim_tick = 0;
         _lastAuthoritativeServerTick = 0;
-        _clientTick = 0;
+        _client_est_server_tick = 0;
         _inputEpoch = 1;
         _nextInputSeq = 0;
-        _nextFireSeq = 0;
-        _lastSentInputTick = 0;
-        _lastStampedSendTick = 0;
+        _client_send_tick = 0;
         _lastAckedSeq = 0;
         _appliedInputDelayTicks = 0;
         _targetInputDelayTicks = 0;
         _delayTicksNextApplyAtSec = 0.0;
-        _joinDelaySmoothUntilSec = 0.0;
-        _warmupBurstTicksRemaining = 0;
-        _pendingWarmupBurst = false;
+        _joinDelayGraceUntilSec = 0.0;
+        _joinInitialInputDelayTicks = 0;
+        _clientJoinDiagUntilSec = 0.0;
+        _clientNextJoinDiagAtSec = 0.0;
+        _clientInputCmdsSentSinceLastDiag = 0;
         _lastCorrectionMeters = 0.0f;
         _lastCorrectionXZMeters = 0.0f;
         _lastCorrectionYMeters = 0.0f;

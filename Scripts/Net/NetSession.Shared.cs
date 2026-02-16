@@ -17,7 +17,7 @@ public partial class NetSession
         PacketType packetType = (PacketType)packet[0];
         if (IsServer && (packetType == PacketType.Fire || (_logControlPackets && packetType == PacketType.Control)))
         {
-            GD.Print($"PktRecv: type={(byte)packetType} ({packetType}) from={fromPeer} len={packet.Length} serverTick={_serverTick}");
+            GD.Print($"PktRecv: type={(byte)packetType} ({packetType}) from={fromPeer} len={packet.Length} serverTick={_server_sim_tick}");
         }
 
         switch (packetType)
@@ -51,6 +51,12 @@ public partial class NetSession
 
     private void SendPacket(int targetPeer, int channel, MultiplayerPeer.TransferModeEnum mode, byte[] packet)
     {
+        if (channel == NetChannels.Input && mode == MultiplayerPeer.TransferModeEnum.Reliable)
+        {
+            GD.PushError("Input packets must not use Reliable mode. Use Unreliable on NetChannels.Input.");
+            return;
+        }
+
         if (_simulator is null)
         {
             SendPacketNow(targetPeer, channel, mode, packet);
@@ -163,7 +169,10 @@ public partial class NetSession
             LastInput = seedInput,
             LastProcessedSeq = 0,
             EffectiveInputDelayTicks = initialDelay,
-            NextPingAtSec = (Time.GetTicksMsec() / 1000.0) + NetConstants.PingIntervalSec
+            NextPingAtSec = (Time.GetTicksMsec() / 1000.0) + NetConstants.PingIntervalSec,
+            JoinDelayGraceUntilSec = (Time.GetTicksMsec() / 1000.0) + 2.0,
+            JoinDiagUntilSec = (Time.GetTicksMsec() / 1000.0) + 3.0,
+            NextJoinDiagAtSec = Time.GetTicksMsec() / 1000.0
         };
     }
 
@@ -242,8 +251,8 @@ public partial class NetSession
         int inputDelayTicksMetric = IsClient ? _appliedInputDelayTicks : _config.ServerInputDelayTicks;
         Metrics = new SessionMetrics
         {
-            ServerTick = _serverTick,
-            ClientTick = _clientTick,
+            ServerSimTick = _server_sim_tick,
+            ClientEstServerTick = _client_est_server_tick,
             LastAckedInput = _lastAckedSeq,
             PendingInputCount = _pendingInputs.Count,
             JumpRepeatRemaining = _jumpPressRepeatTicksRemaining,
@@ -264,7 +273,7 @@ public partial class NetSession
             DynamicInterpolationDelayMs = dynamicInterpDelayMs,
             SessionJitterEstimateMs = sessionSnapshotJitterMs,
             TickErrorTicks = _tickErrorTicks,
-            SendTick = _lastStampedSendTick,
+            ClientSendTick = _client_send_tick > 0 ? _client_send_tick - 1 : 0,
             DropFutureRatePerSec = _dropFutureRatePerSec,
             PendingInputsCap = NetConstants.PendingInputHardCap,
             ResyncTriggered = _resyncTriggered,

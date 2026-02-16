@@ -33,39 +33,14 @@ public partial class NetSession
             AdvanceInputEpoch(resetTickToServerEstimate: true);
         }
 
-        _clientTick = GetEstimatedServerTickNow();
+        _client_est_server_tick = GetEstimatedServerTickNow();
         MaybeResyncClient("tick_drift_guard");
         UpdateAppliedInputDelayTicks();
-        TrySendJoinWarmupBurst();
-        if (_localCharacter is null)
-        {
-            return;
-        }
 
-        InputCommand input = BuildInputCommand();
-
-        _pendingInputs.Add(input);
-        if (_pendingInputs.Count >= NetConstants.PendingInputHardCap)
-        {
-            TriggerClientResync("pending_cap_guard", _lastAuthoritativeServerTick);
-            return;
-        }
-        _localCharacter.SetLook(input.Yaw, input.Pitch);
-        PlayerMotor.Simulate(_localCharacter, input, _config);
-
-        int count = _pendingInputs.GetLatest(NetConstants.MaxInputRedundancy, _inputSendScratch, input.Seq);
-        if (count > 0)
-        {
-            NetCodec.WriteInputBundle(_inputPacket, _inputSendScratch.AsSpan(0, count));
-            if (_mode == RunMode.ListenServer)
-            {
-                HandleInputBundle(_localPeerId, _inputPacket);
-            }
-            else
-            {
-                SendPacket(1, NetChannels.Input, MultiplayerPeer.TransferModeEnum.Unreliable, _inputPacket);
-            }
-        }
+        uint desired_horizon_tick = GetDesiredHorizonTick();
+        int sentThisTick = SendInputsUpToDesiredHorizon(desired_horizon_tick, allowPrediction: _localCharacter is not null);
+        _clientInputCmdsSentSinceLastDiag += sentThisTick;
+        LogClientJoinDiagnosticsIfDue(desired_horizon_tick);
 
         if (_mode != RunMode.Client)
         {
@@ -111,23 +86,110 @@ public partial class NetSession
         return Mathf.Max(0, _appliedInputDelayTicks);
     }
 
-    private void RebaseClientTickToServerEstimate()
+    private uint GetDesiredHorizonTick()
     {
-        if (_mode == RunMode.ListenServer)
-        {
-            _clientTick = _serverTick;
-            _lastSentInputTick = 0;
-            return;
-        }
-
-        _clientTick = GetEstimatedServerTickNow();
-        _lastSentInputTick = 0;
+        uint delayTicks = (uint)GetClientInputDelayTicksForStamping();
+        uint safetyTicks = (uint)Mathf.Max(0, ClientInputSafetyTicks);
+        return _client_est_server_tick + delayTicks + safetyTicks;
     }
 
-    private InputCommand BuildInputCommand()
+    private void RebaseClientTickToServerEstimate()
     {
-        float fixedDt = 1.0f / _config.ClientTickRate;
+        _client_est_server_tick = _mode == RunMode.ListenServer
+            ? _server_sim_tick
+            : GetEstimatedServerTickNow();
 
+        uint minSendTick = _client_est_server_tick + 1;
+        if (_client_send_tick == 0)
+        {
+            _client_send_tick = minSendTick;
+        }
+    }
+
+    private int SendInputsUpToDesiredHorizon(uint desired_horizon_tick, bool allowPrediction)
+    {
+        if (!IsClient)
+        {
+            return 0;
+        }
+
+        uint minSendTick = _client_est_server_tick + 1;
+        if (_client_send_tick == 0)
+        {
+            _client_send_tick = minSendTick;
+        }
+
+        int generatedCount = 0;
+        int packetCount = 0;
+        while (_client_send_tick <= desired_horizon_tick)
+        {
+            int count = 0;
+            while (_client_send_tick <= desired_horizon_tick && count < NetConstants.MaxInputRedundancy)
+            {
+                InputCommand command = BuildInputCommandForTick(_client_send_tick);
+                _inputSendScratch[count++] = command;
+                _pendingInputs.Add(command);
+                if (_pendingInputs.Count >= NetConstants.PendingInputHardCap)
+                {
+                    TriggerClientResync("pending_cap_guard", _lastAuthoritativeServerTick);
+                    return generatedCount;
+                }
+
+                if (allowPrediction && _localCharacter is not null)
+                {
+                    _localCharacter.SetLook(command.Yaw, command.Pitch);
+                    PlayerMotor.Simulate(_localCharacter, command, _config);
+                }
+
+                _client_send_tick++;
+                generatedCount++;
+            }
+
+            if (count <= 0)
+            {
+                break;
+            }
+
+            NetCodec.WriteInputBundle(_inputPacket, _inputSendScratch.AsSpan(0, count));
+            if (_mode == RunMode.ListenServer)
+            {
+                HandleInputBundle(_localPeerId, _inputPacket);
+            }
+            else
+            {
+                SendPacket(1, NetChannels.Input, MultiplayerPeer.TransferModeEnum.Unreliable, _inputPacket);
+            }
+
+            packetCount++;
+            if (packetCount > 64)
+            {
+                break;
+            }
+        }
+
+        return generatedCount;
+    }
+
+    private InputCommand BuildInputCommandForTick(uint sendTick)
+    {
+        InputButtons buttons = ConsumeInputButtons();
+        InputCommand command = new()
+        {
+            Seq = ++_nextInputSeq,
+            InputTick = sendTick,
+            InputEpoch = _inputEpoch,
+            DtFixed = 1.0f / _config.ClientTickRate,
+            MoveAxes = _inputState.MoveAxes,
+            Buttons = buttons,
+            Yaw = _lookYaw,
+            Pitch = _lookPitch
+        };
+        InputSanitizer.SanitizeClient(ref command, _config);
+        return command;
+    }
+
+    private InputButtons ConsumeInputButtons()
+    {
         bool jumpPressed = _jumpPressRepeatTicksRemaining > 0;
         if (_jumpPressRepeatTicksRemaining > 0)
         {
@@ -145,29 +207,41 @@ public partial class NetSession
             buttons |= InputButtons.JumpPressed;
         }
 
-        uint estimatedServerTickNow = GetEstimatedServerTickNow();
-        _clientTick = estimatedServerTickNow;
-        uint inputTick = estimatedServerTickNow + (uint)GetClientInputDelayTicksForStamping();
-        if (inputTick <= _lastSentInputTick)
+        bool firePressed = _firePressRepeatTicksRemaining > 0;
+        if (_firePressRepeatTicksRemaining > 0)
         {
-            inputTick = _lastSentInputTick + 1;
+            _firePressRepeatTicksRemaining--;
         }
-        _lastSentInputTick = inputTick;
-        _lastStampedSendTick = inputTick;
 
-        InputCommand command = new()
+        if (firePressed)
         {
-            Seq = ++_nextInputSeq,
-            InputTick = inputTick,
-            InputEpoch = _inputEpoch,
-            DtFixed = fixedDt,
-            MoveAxes = _inputState.MoveAxes,
-            Buttons = buttons,
-            Yaw = _lookYaw,
-            Pitch = _lookPitch
-        };
-        InputSanitizer.SanitizeClient(ref command, _config);
-        return command;
+            buttons |= InputButtons.FirePressed;
+        }
+
+        return buttons;
+    }
+
+    private void LogClientJoinDiagnosticsIfDue(uint desired_horizon_tick)
+    {
+        if (_mode != RunMode.Client)
+        {
+            return;
+        }
+
+        double nowSec = Time.GetTicksMsec() / 1000.0;
+        if (nowSec > _clientJoinDiagUntilSec || nowSec < _clientNextJoinDiagAtSec)
+        {
+            return;
+        }
+
+        int horizonGap = (int)desired_horizon_tick - (int)_client_send_tick;
+        GD.Print(
+            $"ClientJoinDiag: local_time_ms={Time.GetTicksMsec()} client_est_server_tick={_client_est_server_tick} " +
+            $"input_delay_ticks={_appliedInputDelayTicks} safety_ticks={ClientInputSafetyTicks} " +
+            $"client_send_tick={_client_send_tick} desired_horizon_tick={desired_horizon_tick} horizon_gap={horizonGap} " +
+            $"sent_since_last={_clientInputCmdsSentSinceLastDiag}");
+        _clientInputCmdsSentSinceLastDiag = 0;
+        _clientNextJoinDiagAtSec = nowSec + 0.1;
     }
 
     private void HandleSnapshot(byte[] packet)
@@ -190,7 +264,7 @@ public partial class NetSession
         long localNowUsec = GetLocalUsec();
         double localNowSec = localNowUsec / 1_000_000.0;
         ObserveAuthoritativeServerTick(serverTick, localNowUsec);
-        _serverTick = serverTick;
+        _server_sim_tick = serverTick;
         _lastAuthoritativeServerTick = serverTick;
 
         UpdateSessionSnapshotJitter(localNowSec);
@@ -322,14 +396,15 @@ public partial class NetSession
             0,
             baseInterpDelayTicks + MsToTicks(GlobalInterpMaxExtraMs) + 32);
         UpdateGlobalInterpDelayTicks(targetInterpDelayTicks, nowSec);
-        double renderTick = estimatedServerTickNow - _globalInterpDelayTicks;
+        // Tick clock: client_render_tick (visual interpolation only, never used for gameplay or input stamping).
+        double client_render_tick = estimatedServerTickNow - _globalInterpDelayTicks;
         double maxExtrapTicks = MsToTicks(Mathf.Min(_config.MaxExtrapolationMs, (int)MaxInterpHoldOrExtrapMs));
         bool hadUnderflow = false;
 
         foreach (KeyValuePair<int, RemoteEntity> pair in _remotePlayers)
         {
             RemoteEntity remote = pair.Value;
-            if (!remote.Buffer.TrySample(renderTick, maxExtrapTicks, _config.UseHermiteInterpolation, out RemoteSample sample, out bool underflow))
+            if (!remote.Buffer.TrySample(client_render_tick, maxExtrapTicks, _config.UseHermiteInterpolation, out RemoteSample sample, out bool underflow))
             {
                 continue;
             }
@@ -376,7 +451,7 @@ public partial class NetSession
         long nowUsec = GetLocalUsec();
         if (_netClock is null || _netClock.LastServerTick == 0)
         {
-            return _lastAuthoritativeServerTick > 0 ? _lastAuthoritativeServerTick : _serverTick;
+            return _lastAuthoritativeServerTick > 0 ? _lastAuthoritativeServerTick : _server_sim_tick;
         }
 
         return _netClock.GetEstimatedServerTick(nowUsec);
@@ -481,9 +556,8 @@ public partial class NetSession
         int afterError = (int)afterTick - (int)targetServerTick;
 
         _pendingInputs.Clear();
-        _clientTick = targetServerTick;
-        _lastSentInputTick = 0;
-        _lastStampedSendTick = 0;
+        _client_est_server_tick = targetServerTick;
+
         _lastAckedSeq = _nextInputSeq;
         _localCharacter?.ClearRenderCorrection();
         _localCharacter?.ClearViewCorrection();
@@ -505,11 +579,16 @@ public partial class NetSession
             return;
         }
 
-        bool joinSmoothing = nowSec < _joinDelaySmoothUntilSec;
-        _delayTicksNextApplyAtSec = nowSec + (joinSmoothing ? 1.0 : NetConstants.InputDelayUpdateIntervalSec);
+        bool inJoinGrace = nowSec < _joinDelayGraceUntilSec;
+        _delayTicksNextApplyAtSec = nowSec + (inJoinGrace ? 0.5 : NetConstants.InputDelayUpdateIntervalSec);
         int maxAllowed = Mathf.Min(NetConstants.MaxWanInputDelayTicks, Mathf.Max(0, NetConstants.MaxFutureInputTicks - 2));
         _targetInputDelayTicks = Mathf.Clamp(_targetInputDelayTicks, 0, maxAllowed);
         _appliedInputDelayTicks = Mathf.Clamp(_appliedInputDelayTicks, 0, maxAllowed);
+
+        if (inJoinGrace && _targetInputDelayTicks < _joinInitialInputDelayTicks)
+        {
+            _targetInputDelayTicks = _joinInitialInputDelayTicks;
+        }
 
         int delta = _targetInputDelayTicks - _appliedInputDelayTicks;
         if (delta > 0)
@@ -521,59 +600,4 @@ public partial class NetSession
             _appliedInputDelayTicks--;
         }
     }
-
-    private void TrySendJoinWarmupBurst()
-    {
-        if (!_pendingWarmupBurst || _mode != RunMode.Client || _warmupBurstTicksRemaining <= 0)
-        {
-            return;
-        }
-
-        const int maxPacketsPerTick = 2;
-        int packetsSent = 0;
-        while (_warmupBurstTicksRemaining > 0 && packetsSent < maxPacketsPerTick)
-        {
-            int count = Mathf.Min(NetConstants.MaxInputRedundancy, _warmupBurstTicksRemaining);
-            uint estimatedServerTickNow = GetEstimatedServerTickNow();
-            uint startTick = _lastSentInputTick + 1;
-            uint minWarmupTick = estimatedServerTickNow + 1;
-            if (startTick < minWarmupTick)
-            {
-                startTick = minWarmupTick;
-            }
-            for (int i = 0; i < count; i++)
-            {
-                _inputSendScratch[i] = BuildWarmupNeutralInput(startTick + (uint)i);
-            }
-
-            NetCodec.WriteInputBundle(_inputPacket, _inputSendScratch.AsSpan(0, count));
-            SendPacket(1, NetChannels.Input, MultiplayerPeer.TransferModeEnum.Unreliable, _inputPacket);
-            _lastSentInputTick = startTick + (uint)(count - 1);
-            _lastStampedSendTick = _lastSentInputTick;
-            _warmupBurstTicksRemaining -= count;
-            packetsSent++;
-        }
-
-        if (_warmupBurstTicksRemaining <= 0)
-        {
-            _pendingWarmupBurst = false;
-            GD.Print("NetSession: Warmup input burst complete.");
-        }
-    }
-
-    private InputCommand BuildWarmupNeutralInput(uint inputTick)
-    {
-        return new InputCommand
-        {
-            Seq = ++_nextInputSeq,
-            InputTick = inputTick,
-            InputEpoch = _inputEpoch,
-            DtFixed = 1.0f / _config.ClientTickRate,
-            MoveAxes = Vector2.Zero,
-            Buttons = InputButtons.None,
-            Yaw = _lookYaw,
-            Pitch = _lookPitch
-        };
-    }
-
 }
