@@ -81,6 +81,9 @@ public partial class NetSession
         _lastAckedSeq = _nextInputSeq;
         _jumpPressRepeatTicksRemaining = 0;
         _lastSentInputTick = 0;
+        _lastStampedSendTick = 0;
+        _warmupBurstTicksRemaining = 0;
+        _pendingWarmupBurst = false;
         _localCharacter?.ClearRenderCorrection();
         _localCharacter?.ClearViewCorrection();
 

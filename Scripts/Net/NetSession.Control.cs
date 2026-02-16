@@ -105,6 +105,8 @@ public partial class NetSession
                 _config.JumpVelocity = Mathf.Max(0.1f, NetCodec.ReadControlJumpVelocity(packet));
                 _config.Gravity = Mathf.Max(0.1f, NetCodec.ReadControlGravity(packet));
                 _config.ServerInputDelayTicks = Mathf.Clamp(NetCodec.ReadControlServerInputDelayTicks(packet), 0, NetConstants.MaxWanInputDelayTicks);
+                _appliedInputDelayTicks = _config.ServerInputDelayTicks;
+                _targetInputDelayTicks = _config.ServerInputDelayTicks;
                 _config.FloorSnapLength = Mathf.Clamp(NetCodec.ReadControlFloorSnapLength(packet), 0.0f, 2.0f);
                 _config.GroundStickVelocity = Mathf.Min(NetCodec.ReadControlGroundStickVelocity(packet), -0.01f);
                 _serverTick = NetCodec.ReadControlWelcomeServerTick(packet);
@@ -114,6 +116,11 @@ public partial class NetSession
                 _netClock = new NetClock(_config.ServerTickRate);
                 _netClock.ObserveServerTick(_serverTick, (long)Time.GetTicksUsec());
                 RebaseClientTickToServerEstimate();
+                double welcomeNowSec = Time.GetTicksMsec() / 1000.0;
+                _joinDelaySmoothUntilSec = welcomeNowSec + 2.0;
+                _delayTicksNextApplyAtSec = welcomeNowSec;
+                _warmupBurstTicksRemaining = Mathf.Max(0, _appliedInputDelayTicks + 2);
+                _pendingWarmupBurst = _warmupBurstTicksRemaining > 0;
                 _welcomeReceived = true;
                 TrySpawnLocalCharacter();
                 break;
@@ -153,8 +160,9 @@ public partial class NetSession
                     NetCodec.ReadControlDelayTicks(packet),
                     0,
                     Mathf.Min(NetConstants.MaxWanInputDelayTicks, Mathf.Max(0, NetConstants.MaxFutureInputTicks - 2)));
-                if (_config.ServerInputDelayTicks != delayTicks)
+                if (_targetInputDelayTicks != delayTicks)
                 {
+                    _targetInputDelayTicks = delayTicks;
                     _config.ServerInputDelayTicks = delayTicks;
                     GD.Print($"NetSession: DelayUpdate received => InputDelayTicks={delayTicks}");
                 }

@@ -8,13 +8,12 @@ public static partial class NetCodec
     public static void WriteFire(byte[] packet, in FireRequest request)
     {
         packet[0] = (byte)PacketType.Fire;
-        WriteUInt(packet, 1, request.EstimatedServerTickAtFire);
-        WriteUInt(packet, 5, request.InputEpoch);
-        int offset = 9;
-        WriteVector3(packet, ref offset, request.Origin);
-        WriteFloat(packet, offset, request.Yaw);
-        offset += 4;
-        WriteFloat(packet, offset, request.Pitch);
+        WriteUInt(packet, 1, request.FireSeq);
+        WriteUInt(packet, 5, request.FireTick);
+        WriteUInt(packet, 9, request.InputEpoch);
+        WriteInt(packet, 13, request.InterpDelayTicksUsed);
+        int offset = 17;
+        WriteVector3(packet, ref offset, request.AimDirection);
     }
 
     public static bool TryReadFire(ReadOnlySpan<byte> packet, out FireRequest request)
@@ -25,13 +24,12 @@ public static partial class NetCodec
             return false;
         }
 
-        request.EstimatedServerTickAtFire = ReadUInt(packet, 1);
-        request.InputEpoch = ReadUInt(packet, 5);
-        int offset = 9;
-        request.Origin = ReadVector3(packet, ref offset);
-        request.Yaw = ReadFloat(packet, offset);
-        offset += 4;
-        request.Pitch = ReadFloat(packet, offset);
+        request.FireSeq = ReadUInt(packet, 1);
+        request.FireTick = ReadUInt(packet, 5);
+        request.InputEpoch = ReadUInt(packet, 9);
+        request.InterpDelayTicksUsed = ReadInt(packet, 13);
+        int offset = 17;
+        request.AimDirection = ReadVector3(packet, ref offset);
         return true;
     }
 

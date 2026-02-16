@@ -55,11 +55,11 @@ public struct RemoteSample
 
 public struct FireRequest
 {
-    public uint EstimatedServerTickAtFire;
+    public uint FireSeq;
+    public uint FireTick;
     public uint InputEpoch;
-    public Vector3 Origin;
-    public float Yaw;
-    public float Pitch;
+    public int InterpDelayTicksUsed;
+    public Vector3 AimDirection;
 }
 
 public struct FireResult

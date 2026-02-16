@@ -239,6 +239,7 @@ public partial class NetSession
             }
         }
 
+        int inputDelayTicksMetric = IsClient ? _appliedInputDelayTicks : _config.ServerInputDelayTicks;
         Metrics = new SessionMetrics
         {
             ServerTick = _serverTick,
@@ -255,7 +256,7 @@ public partial class NetSession
             LocalGrounded = _localCharacter?.Grounded ?? false,
             MoveSpeed = _config.MoveSpeed,
             GroundAcceleration = _config.GroundAcceleration,
-            ServerInputDelayTicks = _config.ServerInputDelayTicks,
+            ServerInputDelayTicks = inputDelayTicksMetric,
             NetworkSimulationEnabled = _simEnabled,
             SimLatencyMs = _simLatency,
             SimJitterMs = _simJitter,

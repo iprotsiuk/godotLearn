@@ -39,18 +39,21 @@ public partial class NetSession
 			return;
 		}
 
-		Vector3 origin = _localCharacter.LocalCamera?.GlobalPosition ?? (_localCharacter.GlobalPosition + new Vector3(0.0f, 1.55f, 0.0f));
+		Vector3 aimDir = YawPitchToDirection(_lookYaw, _lookPitch).Normalized();
+		int interpDelayTicks = GetGlobalInterpolationDelayTicks();
+		uint fireTick = GetEstimatedServerTickNow();
 
-		float globalInterpDelayMs = GetGlobalInterpolationDelayMs();
+		float globalInterpDelayMs = TicksToMs(interpDelayTicks);
 		FireRequest request = new()
 		{
-			EstimatedServerTickAtFire = EstimateServerTickAtFire(globalInterpDelayMs),
+			FireSeq = ++_nextFireSeq,
+			FireTick = fireTick,
 			InputEpoch = _inputEpoch,
-			Origin = origin,
-			Yaw = _lookYaw,
-			Pitch = _lookPitch
+			InterpDelayTicksUsed = interpDelayTicks,
+			AimDirection = aimDir
 		};
-		GD.Print($"FireRequest: peer={_localPeerId} estTick={request.EstimatedServerTickAtFire} delayMs={globalInterpDelayMs:0.0} epoch={request.InputEpoch}");
+		uint targetTick = fireTick > (uint)interpDelayTicks ? fireTick - (uint)interpDelayTicks : 0;
+		GD.Print($"FireRequest: peer={_localPeerId} seq={request.FireSeq} fireTick={fireTick} targetTick={targetTick} delayMs={globalInterpDelayMs:0.0} epoch={request.InputEpoch}");
 
 		NetCodec.WriteFire(_firePacket, request);
 		if (_mode == RunMode.ListenServer)
@@ -63,24 +66,14 @@ public partial class NetSession
 		}
 	}
 
-	private uint EstimateServerTickAtFire(float globalInterpDelayMs)
+	private int GetGlobalInterpolationDelayTicks()
 	{
-		uint estimatedServerTickNow = GetEstimatedServerTickNow();
-		int delayTicks = MsToTicks(globalInterpDelayMs);
-		int rawViewTick = (int)estimatedServerTickNow - delayTicks;
-		if (rawViewTick <= 0)
+		if (_globalInterpDelayTicks > 0)
 		{
-			return 0;
+			return _globalInterpDelayTicks;
 		}
 
-		return (uint)rawViewTick;
-	}
-
-	private float GetGlobalInterpolationDelayMs()
-	{
-		return _dynamicInterpolationDelayMs > 0.01f
-			? _dynamicInterpolationDelayMs
-			: Mathf.Max(0.0f, _config.InterpolationDelayMs);
+		return MsToTicks(Mathf.Max(0.0f, _config.InterpolationDelayMs));
 	}
 
 	private void HandleFire(int fromPeer, byte[] packet)
@@ -114,56 +107,85 @@ public partial class NetSession
 			return;
 		}
 
-		uint rewindTick = ClampRewindTick(request.EstimatedServerTickAtFire);
-		Vector3 origin = ClampShotOrigin(fromPeer, rewindTick, request.Origin);
-		Vector3 direction = YawPitchToDirection(request.Yaw, request.Pitch);
+		if (request.FireSeq <= shooter.LastProcessedFireSeq)
+		{
+			return;
+		}
+		shooter.LastProcessedFireSeq = request.FireSeq;
+
+		uint oldestTick = _serverTick > (uint)(RewindHistoryTicks - 1)
+			? _serverTick - (uint)(RewindHistoryTicks - 1)
+			: 0;
+		if (request.FireTick > _serverTick)
+		{
+			GD.Print($"FireReject: future fireTick={request.FireTick} serverTick={_serverTick}");
+			return;
+		}
+		if (request.FireTick < oldestTick)
+		{
+			GD.Print($"FireReject: stale fireTick={request.FireTick} oldest={oldestTick} serverTick={_serverTick}");
+			return;
+		}
+
+		int interpDelayTicks = Mathf.Clamp(request.InterpDelayTicksUsed, 0, RewindHistoryTicks - 1);
+		uint targetTick = request.FireTick > (uint)interpDelayTicks
+			? request.FireTick - (uint)interpDelayTicks
+			: 0;
+		if (targetTick < oldestTick)
+		{
+			targetTick = oldestTick;
+		}
+
+		Vector3 direction = request.AimDirection;
 		if (direction.LengthSquared() <= 0.000001f)
 		{
 			return;
 		}
 
 		direction = direction.Normalized();
+		Vector3 shooterPosAtFire = shooter.Character.GlobalPosition;
+		TryGetHistoricalPosition(fromPeer, request.FireTick, out shooterPosAtFire);
+		Vector3 shooterPosNow = shooter.Character.GlobalPosition;
+		Vector3 shooterPosUsed = shooterPosAtFire;
+		Vector3 origin = shooterPosUsed + new Vector3(0.0f, 1.55f, 0.0f);
+
 		int hitPeer = -1;
 		Vector3 hitPoint = origin + (direction * WeaponMaxRange);
+		if (TryFindRayHitAtTick(fromPeer, targetTick, origin, direction, out int foundPeer, out Vector3 foundPoint))
+		{
+			hitPeer = foundPeer;
+			hitPoint = foundPoint;
+		}
 
-		_rewindRestoreScratch.Clear();
-		try
-		{
-			ApplyRewindToTargets(fromPeer, rewindTick);
-			if (TryFindRayHit(fromPeer, origin, direction, out int foundPeer, out Vector3 foundPoint))
-			{
-				hitPeer = foundPeer;
-				hitPoint = foundPoint;
-			}
-		}
-		finally
-		{
-			RestoreRewoundTargets();
-		}
+		float shooterNowVsFire = shooterPosNow.DistanceTo(shooterPosAtFire);
+		float shooterUsedVsFire = shooterPosUsed.DistanceTo(shooterPosAtFire);
+		GD.Print(
+			$"FireEval: serverTick={_serverTick} fireTick={request.FireTick} targetTick={targetTick} " +
+			$"shooterNowDelta={shooterNowVsFire:0.###} shooterUsedDelta={shooterUsedVsFire:0.###}");
 
 		FireResult result = new()
 		{
 			ShooterPeerId = fromPeer,
 			HitPeerId = hitPeer,
-			ValidatedServerTick = rewindTick
+			ValidatedServerTick = targetTick
 		};
 		if (hitPeer >= 0)
 		{
-			GD.Print($"ServerHit: shooter={fromPeer} target={hitPeer} rewindTick={rewindTick}");
+			GD.Print($"ServerHit: shooter={fromPeer} target={hitPeer} fireTick={request.FireTick} targetTick={targetTick}");
 		}
 		else
 		{
-			GD.Print($"ServerMiss: shooter={fromPeer} rewindTick={rewindTick}");
+			GD.Print($"ServerMiss: shooter={fromPeer} fireTick={request.FireTick} targetTick={targetTick}");
 		}
 		NetCodec.WriteFireResult(_fireResultPacket, result);
 		BroadcastFireResult(_fireResultPacket);
 		FireVisual visual = new()
 		{
 			ShooterPeerId = fromPeer,
-			ValidatedServerTick = rewindTick,
+			ValidatedServerTick = targetTick,
 			Origin = origin,
-			Yaw = request.Yaw,
-			Pitch = request.Pitch,
+			Yaw = DirectionToYaw(direction),
+			Pitch = DirectionToPitch(direction),
 			HitPoint = hitPoint,
 			DidHit = hitPeer >= 0
 		};
@@ -342,7 +364,7 @@ public partial class NetSession
 		_rewindRestoreScratch.Clear();
 	}
 
-	private bool TryFindRayHit(int shooterPeerId, Vector3 origin, Vector3 direction, out int hitPeerId, out Vector3 hitPoint)
+	private bool TryFindRayHitAtTick(int shooterPeerId, uint tick, Vector3 origin, Vector3 direction, out int hitPeerId, out Vector3 hitPoint)
 	{
 		hitPeerId = -1;
 		hitPoint = origin + (direction * WeaponMaxRange);
@@ -356,7 +378,9 @@ public partial class NetSession
 				continue;
 			}
 
-			Vector3 center = pair.Value.Character.GlobalPosition + new Vector3(0.0f, 0.9f, 0.0f);
+			Vector3 targetPos = pair.Value.Character.GlobalPosition;
+			TryGetHistoricalPosition(peerId, tick, out targetPos);
+			Vector3 center = targetPos + new Vector3(0.0f, 0.9f, 0.0f);
 			if (!TryRaySphereHit(origin, direction, center, WeaponTargetRadius, WeaponMaxRange, out float distance))
 			{
 				continue;
@@ -373,6 +397,42 @@ public partial class NetSession
 		}
 
 		return hitPeerId >= 0;
+	}
+
+	private bool TryGetHistoricalPosition(int peerId, uint tick, out Vector3 position)
+	{
+		if (TryGetRewindPosition(peerId, tick, out position))
+		{
+			return true;
+		}
+
+		uint oldestTick = _serverTick > (uint)(RewindHistoryTicks - 1)
+			? _serverTick - (uint)(RewindHistoryTicks - 1)
+			: 0;
+		for (uint scanTick = tick; scanTick >= oldestTick; scanTick--)
+		{
+			if (TryGetRewindPosition(peerId, scanTick, out position))
+			{
+				return true;
+			}
+			if (scanTick == 0)
+			{
+				break;
+			}
+		}
+
+		position = Vector3.Zero;
+		return false;
+	}
+
+	private static float DirectionToYaw(Vector3 direction)
+	{
+		return Mathf.Atan2(-direction.X, -direction.Z);
+	}
+
+	private static float DirectionToPitch(Vector3 direction)
+	{
+		return Mathf.Asin(Mathf.Clamp(direction.Y, -1.0f, 1.0f));
 	}
 
 	private static bool TryRaySphereHit(

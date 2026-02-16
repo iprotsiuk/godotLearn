@@ -35,6 +35,8 @@ public partial class NetSession
 
         _clientTick = GetEstimatedServerTickNow();
         MaybeResyncClient("tick_drift_guard");
+        UpdateAppliedInputDelayTicks();
+        TrySendJoinWarmupBurst();
         if (_localCharacter is null)
         {
             return;
@@ -106,7 +108,7 @@ public partial class NetSession
             return 0;
         }
 
-        return Mathf.Max(0, _config.ServerInputDelayTicks);
+        return Mathf.Max(0, _appliedInputDelayTicks);
     }
 
     private void RebaseClientTickToServerEstimate()
@@ -488,6 +490,90 @@ public partial class NetSession
         _resyncTriggered = true;
         _resyncCount++;
         GD.Print($"RESYNC: reason={reason} tickError(before/after)={beforeError}/{afterError} targetTick={targetServerTick}");
+    }
+
+    private void UpdateAppliedInputDelayTicks()
+    {
+        double nowSec = Time.GetTicksMsec() / 1000.0;
+        if (_delayTicksNextApplyAtSec <= 0.0)
+        {
+            _delayTicksNextApplyAtSec = nowSec;
+        }
+
+        if (nowSec < _delayTicksNextApplyAtSec)
+        {
+            return;
+        }
+
+        bool joinSmoothing = nowSec < _joinDelaySmoothUntilSec;
+        _delayTicksNextApplyAtSec = nowSec + (joinSmoothing ? 1.0 : NetConstants.InputDelayUpdateIntervalSec);
+        int maxAllowed = Mathf.Min(NetConstants.MaxWanInputDelayTicks, Mathf.Max(0, NetConstants.MaxFutureInputTicks - 2));
+        _targetInputDelayTicks = Mathf.Clamp(_targetInputDelayTicks, 0, maxAllowed);
+        _appliedInputDelayTicks = Mathf.Clamp(_appliedInputDelayTicks, 0, maxAllowed);
+
+        int delta = _targetInputDelayTicks - _appliedInputDelayTicks;
+        if (delta > 0)
+        {
+            _appliedInputDelayTicks++;
+        }
+        else if (delta < 0)
+        {
+            _appliedInputDelayTicks--;
+        }
+    }
+
+    private void TrySendJoinWarmupBurst()
+    {
+        if (!_pendingWarmupBurst || _mode != RunMode.Client || _warmupBurstTicksRemaining <= 0)
+        {
+            return;
+        }
+
+        const int maxPacketsPerTick = 2;
+        int packetsSent = 0;
+        while (_warmupBurstTicksRemaining > 0 && packetsSent < maxPacketsPerTick)
+        {
+            int count = Mathf.Min(NetConstants.MaxInputRedundancy, _warmupBurstTicksRemaining);
+            uint estimatedServerTickNow = GetEstimatedServerTickNow();
+            uint startTick = _lastSentInputTick + 1;
+            uint minWarmupTick = estimatedServerTickNow + 1;
+            if (startTick < minWarmupTick)
+            {
+                startTick = minWarmupTick;
+            }
+            for (int i = 0; i < count; i++)
+            {
+                _inputSendScratch[i] = BuildWarmupNeutralInput(startTick + (uint)i);
+            }
+
+            NetCodec.WriteInputBundle(_inputPacket, _inputSendScratch.AsSpan(0, count));
+            SendPacket(1, NetChannels.Input, MultiplayerPeer.TransferModeEnum.Unreliable, _inputPacket);
+            _lastSentInputTick = startTick + (uint)(count - 1);
+            _lastStampedSendTick = _lastSentInputTick;
+            _warmupBurstTicksRemaining -= count;
+            packetsSent++;
+        }
+
+        if (_warmupBurstTicksRemaining <= 0)
+        {
+            _pendingWarmupBurst = false;
+            GD.Print("NetSession: Warmup input burst complete.");
+        }
+    }
+
+    private InputCommand BuildWarmupNeutralInput(uint inputTick)
+    {
+        return new InputCommand
+        {
+            Seq = ++_nextInputSeq,
+            InputTick = inputTick,
+            InputEpoch = _inputEpoch,
+            DtFixed = 1.0f / _config.ClientTickRate,
+            MoveAxes = Vector2.Zero,
+            Buttons = InputButtons.None,
+            Yaw = _lookYaw,
+            Pitch = _lookPitch
+        };
     }
 
 }
