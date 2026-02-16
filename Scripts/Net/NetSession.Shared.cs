@@ -6,6 +6,17 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private bool IsTransportConnected()
+    {
+        MultiplayerPeer? peer = Multiplayer.MultiplayerPeer;
+        if (peer is null || _sceneMultiplayer is null)
+        {
+            return false;
+        }
+
+        return peer.GetConnectionStatus() == MultiplayerPeer.ConnectionStatus.Connected;
+    }
+
     private void OnPeerPacket(long fromPeerLong, byte[] packet)
     {
         if (_mode == RunMode.None || packet.Length == 0)
@@ -68,12 +79,13 @@ public partial class NetSession
 
     private void SendPacketNow(int targetPeer, int channel, MultiplayerPeer.TransferModeEnum mode, byte[] packet)
     {
-        if (Multiplayer.MultiplayerPeer is null || _sceneMultiplayer is null)
+        SceneMultiplayer? sceneMultiplayer = _sceneMultiplayer;
+        if (!IsTransportConnected() || sceneMultiplayer is null)
         {
             return;
         }
 
-        Error err = _sceneMultiplayer.SendBytes(packet, targetPeer, mode, channel);
+        Error err = sceneMultiplayer.SendBytes(packet, targetPeer, mode, channel);
         if (err != Error.Ok)
         {
             GD.PushError($"SendBytes failed: {err} (target={targetPeer}, channel={channel}, mode={mode})");

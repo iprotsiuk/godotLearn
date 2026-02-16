@@ -282,14 +282,7 @@ public partial class NetSession : Node
         {
             return;
         }
-        if (@event is InputEventMouseMotion mouseMotion && Input.MouseMode == Input.MouseModeEnum.Captured)
-        {
-            float maxPitch = Mathf.DegToRad(_config.PitchClampDegrees);
-            _lookYaw -= (float)(mouseMotion.Relative.X * _config.MouseSensitivity);
-            _lookPitch -= (float)(mouseMotion.Relative.Y * _config.MouseSensitivity);
-            _lookPitch = Mathf.Clamp(_lookPitch, -maxPitch, maxPitch);
-            _localCharacter.SetLook(_lookYaw, _lookPitch);
-        }
+
         if (@event.IsActionPressed("jump"))
         {
             TryLatchGroundedJump();
@@ -307,6 +300,25 @@ public partial class NetSession : Node
         {
             Input.MouseMode = Input.MouseModeEnum.Captured;
         }
+    }
+
+    public override void _Input(InputEvent @event)
+    {
+        if (_localCharacter is null || !_hasFocus)
+        {
+            return;
+        }
+
+        if (@event is not InputEventMouseMotion mouseMotion || Input.MouseMode != Input.MouseModeEnum.Captured)
+        {
+            return;
+        }
+
+        float maxPitch = Mathf.DegToRad(_config.PitchClampDegrees);
+        _lookYaw -= (float)(mouseMotion.Relative.X * _config.MouseSensitivity);
+        _lookPitch -= (float)(mouseMotion.Relative.Y * _config.MouseSensitivity);
+        _lookPitch = Mathf.Clamp(_lookPitch, -maxPitch, maxPitch);
+        _localCharacter.SetLook(_lookYaw, _lookPitch);
     }
 
     public bool StartListenServer(int port)

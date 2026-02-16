@@ -30,6 +30,11 @@ public partial class NetSession
 
     private void TickClient(float delta)
     {
+        if (_mode == RunMode.Client && !IsTransportConnected())
+        {
+            return;
+        }
+
         if (delta > NetConstants.StallEpochThresholdSeconds)
         {
             AdvanceInputEpoch(resetTickToServerEstimate: true);
