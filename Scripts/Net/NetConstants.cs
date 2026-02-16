@@ -14,7 +14,7 @@ public static class NetConstants
 {
     public const uint ProtocolVersion = 5;
     public const int MaxPlayers = 16;
-    public const int MaxInputRedundancy = 3;
+    public const int MaxInputRedundancy = 5;
 
     public const int InputCommandBytes = 33;
     public const int SnapshotStateBytes = 81;

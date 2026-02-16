@@ -125,11 +125,9 @@ public partial class NetSession
         int packetCount = 0;
         while (_client_send_tick <= desired_horizon_tick)
         {
-            int count = 0;
-            while (_client_send_tick <= desired_horizon_tick && count < NetConstants.MaxInputRedundancy)
+            while (_client_send_tick <= desired_horizon_tick)
             {
                 InputCommand command = BuildInputCommandForTick(_client_send_tick);
-                _inputSendScratch[count++] = command;
                 _pendingInputs.Add(command);
                 if (_pendingInputs.Count >= NetConstants.PendingInputHardCap)
                 {
@@ -147,12 +145,16 @@ public partial class NetSession
                 generatedCount++;
             }
 
-            if (count <= 0)
+            int sendCount = _pendingInputs.GetLatest(NetConstants.MaxInputRedundancy, _inputSendScratch.AsSpan(), _nextInputSeq);
+            if (sendCount <= 0)
             {
                 break;
             }
 
-            NetCodec.WriteInputBundle(_inputPacket, _inputSendScratch.AsSpan(0, count));
+            NetCodec.WriteInputBundle(_inputPacket, _inputSendScratch.AsSpan(0, sendCount));
+            uint newestSeq = _inputSendScratch[0].Seq;
+            uint oldestSeq = _inputSendScratch[sendCount - 1].Seq;
+            GD.Print($"InputSendDiag: seq_range={oldestSeq}..{newestSeq} sendCount={sendCount}");
             if (_mode == RunMode.ListenServer)
             {
                 HandleInputBundle(_localPeerId, _inputPacket);
