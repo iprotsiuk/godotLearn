@@ -45,7 +45,19 @@ public partial class NetSession
         UpdateAppliedInputDelayTicks();
 
         uint desired_horizon_tick = GetDesiredHorizonTick();
+        if (_localCharacter is not null && desired_horizon_tick < _client_send_tick)
+        {
+            desired_horizon_tick = _client_send_tick;
+        }
+
         int sentThisTick = SendInputsUpToDesiredHorizon(desired_horizon_tick, allowPrediction: _localCharacter is not null);
+        if (_logControlPackets && _localCharacter is not null && sentThisTick == 0)
+        {
+            GD.Print(
+                $"PredictDiagZeroStep: client_est_server_tick={_client_est_server_tick} " +
+                $"client_send_tick={_client_send_tick} desired_horizon_tick={desired_horizon_tick}");
+        }
+
         _clientInputCmdsSentSinceLastDiag += sentThisTick;
         LogClientJoinDiagnosticsIfDue(desired_horizon_tick);
 
@@ -486,6 +498,11 @@ public partial class NetSession
 
     private uint GetEstimatedServerTickNow()
     {
+        if (_mode == RunMode.ListenServer)
+        {
+            return _server_sim_tick;
+        }
+
         long nowUsec = GetLocalUsec();
         if (_netClock is null || _netClock.LastServerTick == 0)
         {

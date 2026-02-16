@@ -28,7 +28,7 @@ public sealed class NetClock
             deltaUsec = 0;
         }
 
-        long elapsedTicks = (deltaUsec * _serverTickRate) / 1_000_000L;
+        long elapsedTicks = ((deltaUsec * _serverTickRate) + 500_000L) / 1_000_000L;
         long estimated = _syncServerTick + elapsedTicks;
         if (estimated < 0)
         {
