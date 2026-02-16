@@ -10,6 +10,7 @@ public partial class DebugOverlay : CanvasLayer
     public delegate void NetSimChangedEventHandler(bool enabled, int latencyMs, int jitterMs, float lossPercent);
 
     private Panel? _panel;
+    private Label? _titleLabel;
     private Label? _statsLabel;
 
     private CheckBox? _simEnabled;
@@ -49,8 +50,8 @@ public partial class DebugOverlay : CanvasLayer
         };
         _panel.AddChild(vbox);
 
-        Label title = new() { Text = "Debug (F1 to toggle)" };
-        vbox.AddChild(title);
+        _titleLabel = new Label { Text = "Debug (F1 to toggle) | FPS: 0.0" };
+        vbox.AddChild(_titleLabel);
 
         _statsLabel = new Label
         {
@@ -131,6 +132,10 @@ public partial class DebugOverlay : CanvasLayer
         }
 
         _nextStatsRefreshAtSec = nowSec + 0.1;
+        if (_titleLabel is not null)
+        {
+            _titleLabel.Text = $"Debug (F1 to toggle) | FPS: {metrics.FramesPerSecond:0.0}";
+        }
 
         string rttText = metrics.RttMs < 0.0f ? "N/A" : $"{metrics.RttMs:0.0} ms";
         string jitterText = metrics.JitterMs < 0.0f ? "N/A" : $"{metrics.JitterMs:0.0} ms";
