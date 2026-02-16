@@ -1,10 +1,13 @@
-// Scripts/UI/MainMenu.cs
 using Godot;
+using NetRunnerSlice.UI.Menu;
 
 namespace NetRunnerSlice.UI;
 
 public partial class MainMenu : Control
 {
+	private const string MainScreenScenePath = "res://Scenes/UI/Menu/MainMenuMainScreen.tscn";
+	private const string SettingsScreenScenePath = "res://Scenes/UI/Menu/MainMenuSettingsScreen.tscn";
+
 	[Signal]
 	public delegate void HostRequestedEventHandler(int port);
 
@@ -14,75 +17,103 @@ public partial class MainMenu : Control
 	[Signal]
 	public delegate void QuitRequestedEventHandler();
 
-	private LineEdit? _ipEdit;
-	private LineEdit? _portEdit;
-	private Label? _statusLabel;
+	[Signal]
+	public delegate void SettingsAppliedEventHandler(float mouseSensitivity, bool invertLookY, float localFov);
+
+	private Control? _content;
+	private MainMenuMainScreen? _mainScreen;
+	private MainMenuSettingsScreen? _settingsScreen;
+	private string _defaultIp = "127.0.0.1";
+	private int _defaultPort = 7777;
+	private string _status = "Ready";
+	private MenuSettings _settings = new();
 
 	public override void _Ready()
 	{
-		_ipEdit = GetNode<LineEdit>("Root/Panel/VBox/IpEdit");
-		_portEdit = GetNode<LineEdit>("Root/Panel/VBox/PortEdit");
-		_statusLabel = GetNode<Label>("Root/Panel/VBox/StatusLabel");
-
-		GetNode<Button>("Root/Panel/VBox/HostButton").Pressed += OnHostPressed;
-		GetNode<Button>("Root/Panel/VBox/JoinButton").Pressed += OnJoinPressed;
-		GetNode<Button>("Root/Panel/VBox/QuitButton").Pressed += OnQuitPressed;
+		_content = GetNode<Control>("Root/Panel/Content");
+		ShowMainScreen();
 	}
 
 	public void SetDefaults(string ip, int port)
 	{
-		if (_ipEdit is not null)
-		{
-			_ipEdit.Text = ip;
-		}
-
-		if (_portEdit is not null)
-		{
-			_portEdit.Text = port.ToString();
-		}
+		_defaultIp = string.IsNullOrWhiteSpace(ip) ? "127.0.0.1" : ip.Trim();
+		_defaultPort = Mathf.Clamp(port, 1, 65535);
+		_mainScreen?.SetDefaults(_defaultIp, _defaultPort);
 	}
 
 	public void SetStatus(string status)
 	{
-		if (_statusLabel is not null)
-		{
-			_statusLabel.Text = status;
-		}
+		_status = status;
+		_mainScreen?.SetStatus(_status);
 	}
 
-	private void OnHostPressed()
+	public void SetSettings(MenuSettings settings)
 	{
-		int port = ParsePort();
-		GD.Print($"MainMenu: Host pressed (port={port})");
-		EmitSignal(SignalName.HostRequested, port);
+		_settings = settings.Clone();
+		_settingsScreen?.SetSettings(_settings);
 	}
 
-	private void OnJoinPressed()
+	private void ShowMainScreen()
 	{
-		int port = ParsePort();
-		string ip = _ipEdit?.Text.Trim() ?? "127.0.0.1";
-		if (string.IsNullOrEmpty(ip))
+		ClearContent();
+		if (_content is null)
 		{
-			ip = "127.0.0.1";
+			return;
 		}
 
-		GD.Print($"MainMenu: Join pressed (ip={ip}, port={port})");
-		EmitSignal(SignalName.JoinRequested, ip, port);
+		PackedScene scene = GD.Load<PackedScene>(MainScreenScenePath);
+		_mainScreen = scene.Instantiate<MainMenuMainScreen>();
+		_mainScreen.Name = "MainScreen";
+		_content.AddChild(_mainScreen);
+
+		_mainScreen.SetDefaults(_defaultIp, _defaultPort);
+		_mainScreen.SetStatus(_status);
+
+		_mainScreen.HostPressed += port => EmitSignal(SignalName.HostRequested, port);
+		_mainScreen.JoinPressed += (ip, port) => EmitSignal(SignalName.JoinRequested, ip, port);
+		_mainScreen.SettingsPressed += ShowSettingsScreen;
+		_mainScreen.QuitPressed += () => EmitSignal(SignalName.QuitRequested);
 	}
 
-	private void OnQuitPressed()
+	private void ShowSettingsScreen()
 	{
-		GD.Print("MainMenu: Quit pressed");
-		EmitSignal(SignalName.QuitRequested);
-	}
-
-	private int ParsePort()
-	{
-		if (_portEdit is not null && int.TryParse(_portEdit.Text.Trim(), out int parsed))
+		ClearContent();
+		if (_content is null)
 		{
-			return Mathf.Clamp(parsed, 1, 65535);
+			return;
 		}
 
-		return 7777;
+		PackedScene scene = GD.Load<PackedScene>(SettingsScreenScenePath);
+		_settingsScreen = scene.Instantiate<MainMenuSettingsScreen>();
+		_settingsScreen.Name = "SettingsScreen";
+		_content.AddChild(_settingsScreen);
+		_settingsScreen.SetSettings(_settings);
+
+		_settingsScreen.ApplyPressed += OnSettingsApplyPressed;
+		_settingsScreen.BackPressed += ShowMainScreen;
+	}
+
+	private void OnSettingsApplyPressed(float sensitivity, bool invertLookY, float localFov)
+	{
+		_settings.MouseSensitivity = Mathf.Clamp(sensitivity, 0.0005f, 0.02f);
+		_settings.InvertLookY = invertLookY;
+		_settings.LocalFov = Mathf.Clamp(localFov, 60.0f, 120.0f);
+		EmitSignal(SignalName.SettingsApplied, _settings.MouseSensitivity, _settings.InvertLookY, _settings.LocalFov);
+	}
+
+	private void ClearContent()
+	{
+		_mainScreen = null;
+		_settingsScreen = null;
+
+		if (_content is null)
+		{
+			return;
+		}
+
+		foreach (Node child in _content.GetChildren())
+		{
+			child.QueueFree();
+		}
 	}
 }

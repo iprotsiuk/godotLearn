@@ -4,6 +4,7 @@ using NetRunnerSlice.Debug;
 using NetRunnerSlice.GameModes;
 using NetRunnerSlice.Net;
 using NetRunnerSlice.UI;
+using NetRunnerSlice.UI.Menu;
 namespace NetRunnerSlice.Bootstrap;
 public partial class Main : Node
 {
@@ -16,8 +17,10 @@ public partial class Main : Node
     private MainMenu? _menu;
     private DebugOverlay? _overlay;
     private Node? _sceneRoot;
+    private CanvasLayer? _uiRoot;
     private Node3D? _activeWorld;
     private Node3D? _playersRoot;
+    private MenuSettings _menuSettings = new();
     private bool _hasWorldSpawnOrigin;
     private Transform3D _worldSpawnOrigin = Transform3D.Identity;
     private bool _joinPending;
@@ -34,6 +37,8 @@ public partial class Main : Node
             (_cli.Profile == NetworkProfile.Wan ? "res://Config/network_config_wan.json" : "res://Config/network_config.json");
         _activeProfile = _cli.Profile == NetworkProfile.Lan ? "LAN" : (_cli.Profile == NetworkProfile.Wan ? "WAN" : "DEFAULT");
         _config = NetworkConfigLoader.Load(configPath);
+        _menuSettings = MenuSettingsStore.Load();
+        ApplyMenuSettingsToConfig();
         bool dedicatedMode = _cli.Role == StartupRole.Dedicated;
         if (!dedicatedMode)
         {
@@ -118,21 +123,30 @@ public partial class Main : Node
     }
     private void BuildUi()
     {
+        EnsureUiRoot();
+        if (_uiRoot is null)
+        {
+            GD.PushError("UIRoot is missing.");
+            return;
+        }
+
         PackedScene menuScene = GD.Load<PackedScene>(MainMenuScenePath);
         _menu = menuScene.Instantiate<MainMenu>();
         _menu.Name = "MainMenu";
-        AddChild(_menu);
+        _uiRoot.AddChild(_menu);
         _overlay = new DebugOverlay { Name = "DebugOverlay" };
-        AddChild(_overlay);
+        _uiRoot.AddChild(_overlay);
         _menu.HostRequested += StartHost;
         _menu.JoinRequested += StartJoin;
         _menu.QuitRequested += OnQuit;
+        _menu.SettingsApplied += OnSettingsApplied;
         _overlay.NetSimChanged += OnNetSimChanged;
         _overlay.SetProfileName(_activeProfile);
         if (_cli is not null)
         {
             _menu.SetDefaults(_cli.Ip, _cli.Port);
         }
+        _menu.SetSettings(_menuSettings);
         _menu.SetStatus("Ready");
     }
     private void EnsureSceneRoot()
@@ -147,6 +161,21 @@ public partial class Main : Node
             Name = "SceneRoot"
         };
         AddChild(_sceneRoot);
+    }
+    private void EnsureUiRoot()
+    {
+        _uiRoot = GetNodeOrNull<CanvasLayer>("UIRoot");
+        if (_uiRoot is not null)
+        {
+            return;
+        }
+
+        _uiRoot = new CanvasLayer
+        {
+            Name = "UIRoot",
+            Layer = 1
+        };
+        AddChild(_uiRoot);
     }
     private bool LoadTestWorld()
     {
@@ -321,8 +350,32 @@ public partial class Main : Node
     {
         GetTree().Quit();
     }
+    private void OnSettingsApplied(float mouseSensitivity, bool invertLookY, float localFov)
+    {
+        _menuSettings.MouseSensitivity = mouseSensitivity;
+        _menuSettings.InvertLookY = invertLookY;
+        _menuSettings.LocalFov = localFov;
+        ApplyMenuSettingsToConfig();
+        _session?.ApplyLocalViewSettings(
+            _menuSettings.MouseSensitivity,
+            _menuSettings.InvertLookY,
+            _menuSettings.LocalFov);
+        MenuSettingsStore.Save(_menuSettings);
+        _menu?.SetStatus("Settings saved.");
+    }
     private void OnNetSimChanged(bool enabled, int latencyMs, int jitterMs, float lossPercent)
     {
         _session?.ApplySimulationOverride(enabled, latencyMs, jitterMs, lossPercent, _simSeed);
+    }
+    private void ApplyMenuSettingsToConfig()
+    {
+        if (_config is null)
+        {
+            return;
+        }
+
+        _config.MouseSensitivity = _menuSettings.MouseSensitivity;
+        _config.InvertLookY = _menuSettings.InvertLookY;
+        _config.LocalFov = _menuSettings.LocalFov;
     }
 }

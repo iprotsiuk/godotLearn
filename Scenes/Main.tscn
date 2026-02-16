@@ -6,3 +6,6 @@
 script = ExtResource("1_main")
 
 [node name="SceneRoot" type="Node" parent="."]
+
+[node name="UIRoot" type="CanvasLayer" parent="."]
+layer = 1

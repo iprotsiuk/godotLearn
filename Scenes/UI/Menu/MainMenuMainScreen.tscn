@@ -1,0 +1,46 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/UI/Menu/MainMenuMainScreen.cs" id="1_main"]
+
+[node name="MainMenuMainScreen" type="VBoxContainer"]
+custom_minimum_size = Vector2(340, 0)
+offset_right = 340.0
+offset_bottom = 40.0
+theme_override_constants/separation = 8
+script = ExtResource("1_main")
+
+[node name="TitleLabel" type="Label" parent="."]
+layout_mode = 2
+text = "NetRunner Slice"
+horizontal_alignment = 1
+
+[node name="IpEdit" type="LineEdit" parent="."]
+layout_mode = 2
+placeholder_text = "Server IP"
+text = "127.0.0.1"
+
+[node name="PortEdit" type="LineEdit" parent="."]
+layout_mode = 2
+placeholder_text = "Port"
+text = "7777"
+
+[node name="HostButton" type="Button" parent="."]
+layout_mode = 2
+text = "Host"
+
+[node name="JoinButton" type="Button" parent="."]
+layout_mode = 2
+text = "Join"
+
+[node name="SettingsButton" type="Button" parent="."]
+layout_mode = 2
+text = "Settings"
+
+[node name="QuitButton" type="Button" parent="."]
+layout_mode = 2
+text = "Quit"
+
+[node name="StatusLabel" type="Label" parent="."]
+layout_mode = 2
+text = "Ready"
+autowrap_mode = 2

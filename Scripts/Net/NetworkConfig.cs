@@ -24,6 +24,8 @@ public sealed class NetworkConfig
     public float GroundStickVelocity { get; set; } = -0.1f;
 
     public float MouseSensitivity { get; set; } = 0.0023f;
+    public bool InvertLookY { get; set; } = false;
+    public float LocalFov { get; set; } = 90.0f;
     public float PitchClampDegrees { get; set; } = 89.0f;
 
     public int SimulatedLatencyMs { get; set; } = 0;

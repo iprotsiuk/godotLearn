@@ -1,0 +1,77 @@
+[gd_scene format=3 uid="uid://d2x5t8uxknow1"]
+
+[ext_resource type="Script" uid="uid://v83hu5wonqap" path="res://Scripts/UI/Menu/MainMenuSettingsScreen.cs" id="1_settings"]
+
+[node name="MainMenuSettingsScreen" type="VBoxContainer" unique_id=215444322]
+custom_minimum_size = Vector2(340, 0)
+offset_right = 340.0
+offset_bottom = 40.0
+theme_override_constants/separation = 8
+script = ExtResource("1_settings")
+
+[node name="TitleLabel" type="Label" parent="." unique_id=633234068]
+layout_mode = 2
+text = "Settings"
+horizontal_alignment = 1
+
+[node name="SensitivityLabel" type="Label" parent="." unique_id=1261181264]
+layout_mode = 2
+text = "Mouse Sensitivity"
+
+[node name="SensitivityRow" type="HBoxContainer" parent="." unique_id=1255719979]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SensitivitySlider" type="HSlider" parent="SensitivityRow" unique_id=2112861487]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0005
+max_value = 0.02
+step = 0.0001
+value = 0.0023
+
+[node name="SensitivityValue" type="Label" parent="SensitivityRow" unique_id=1548604931]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "0.0023"
+horizontal_alignment = 2
+
+[node name="InvertLookY" type="CheckBox" parent="." unique_id=1935665883]
+layout_mode = 2
+text = "Invert Vertical Look"
+
+[node name="FovLabel" type="Label" parent="." unique_id=1851067333]
+layout_mode = 2
+text = "Field of View"
+
+[node name="FovRow" type="HBoxContainer" parent="." unique_id=492821845]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="FovSlider" type="HSlider" parent="FovRow" unique_id=325005496]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 60.0
+max_value = 120.0
+value = 90.0
+
+[node name="FovValue" type="Label" parent="FovRow" unique_id=1470439894]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "90"
+horizontal_alignment = 2
+
+[node name="ApplyButton" type="Button" parent="." unique_id=183822468]
+layout_mode = 2
+text = "Apply"
+
+[node name="Label" type="Label" parent="." unique_id=62357870]
+layout_mode = 2
+text = "FPS lock"
+
+[node name="OptionButton" type="OptionButton" parent="." unique_id=1934889301]
+layout_mode = 2
+
+[node name="BackButton" type="Button" parent="." unique_id=412894420]
+layout_mode = 2
+text = "Back"

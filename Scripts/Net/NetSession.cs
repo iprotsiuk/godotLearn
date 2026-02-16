@@ -181,6 +181,16 @@ public partial class NetSession : Node
     {
         _logControlPackets = logControlPackets;
     }
+    public void ApplyLocalViewSettings(float mouseSensitivity, bool invertLookY, float localFov)
+    {
+        _config.MouseSensitivity = Mathf.Clamp(mouseSensitivity, 0.0005f, 0.02f);
+        _config.InvertLookY = invertLookY;
+        _config.LocalFov = Mathf.Clamp(localFov, 60.0f, 120.0f);
+        if (_localCharacter?.LocalCamera is Camera3D camera)
+        {
+            camera.Fov = _config.LocalFov;
+        }
+    }
     public void Initialize(NetworkConfig config, Node3D playerRoot)
     {
         _config = config;
@@ -315,8 +325,10 @@ public partial class NetSession : Node
         }
 
         float maxPitch = Mathf.DegToRad(_config.PitchClampDegrees);
-        _lookYaw -= (float)(mouseMotion.Relative.X * _config.MouseSensitivity);
-        _lookPitch -= (float)(mouseMotion.Relative.Y * _config.MouseSensitivity);
+        float lookX = (float)(mouseMotion.Relative.X * _config.MouseSensitivity);
+        float lookY = (float)(mouseMotion.Relative.Y * _config.MouseSensitivity);
+        _lookYaw -= lookX;
+        _lookPitch += _config.InvertLookY ? lookY : -lookY;
         _lookPitch = Mathf.Clamp(_lookPitch, -maxPitch, maxPitch);
         _localCharacter.SetLook(_lookYaw, _lookPitch);
     }

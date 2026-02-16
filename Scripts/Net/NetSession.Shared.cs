@@ -145,7 +145,7 @@ public partial class NetSession
             Name = $"Player_{peerId}"
         };
 
-        character.Setup(peerId, localCamera, TintForPeer(peerId, localCamera));
+        character.Setup(peerId, localCamera, TintForPeer(peerId, localCamera), _config.LocalFov);
         character.Visible = visible;
         _playerRoot.AddChild(character);
         character.GlobalPosition = SpawnPointForPeer(peerId);
