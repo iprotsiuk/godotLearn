@@ -53,7 +53,7 @@ public partial class NetSession
 
     private void TryLatchFirePressed()
     {
-        _firePressRepeatTicksRemaining = Mathf.Clamp(2, 1, NetConstants.MaxInputRedundancy);
+        _firePressRepeatTicksRemaining = Mathf.Clamp(1, 1, NetConstants.MaxInputRedundancy);
     }
 
     private void OnFocusOut()

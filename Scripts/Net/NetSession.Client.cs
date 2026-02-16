@@ -118,11 +118,7 @@ public partial class NetSession
             ? _server_sim_tick
             : GetEstimatedServerTickNow();
 
-        uint minSendTick = _client_est_server_tick + 1;
-        if (_client_send_tick < minSendTick)
-        {
-            _client_send_tick = minSendTick;
-        }
+        _client_send_tick = _client_est_server_tick + 1;
     }
 
     private int SendInputsUpToDesiredHorizon(uint desired_horizon_tick, bool allowPrediction)
@@ -656,11 +652,7 @@ public partial class NetSession
 
         _pendingInputs.Clear();
         _client_est_server_tick = targetServerTick;
-        uint minSendTick = targetServerTick + 1;
-        if (_client_send_tick < minSendTick)
-        {
-            _client_send_tick = minSendTick;
-        }
+        _client_send_tick = targetServerTick + 1;
 
         _lastAckedSeq = _nextInputSeq;
         _localCharacter?.ClearRenderCorrection();
