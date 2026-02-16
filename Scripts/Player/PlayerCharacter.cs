@@ -1,6 +1,7 @@
 // Scripts/Player/PlayerCharacter.cs
 using Godot;
 using NetRunnerSlice.Net;
+using NetRunnerSlice.Player.Locomotion;
 
 namespace NetRunnerSlice.Player;
 
@@ -30,6 +31,7 @@ public partial class PlayerCharacter : CharacterBody3D
 	private bool _hasLeftGroundSinceJump;
 	private bool _groundedOverrideValid;
 	private bool _groundedOverrideValue;
+	private LocomotionState _locomotionState = LocomotionState.CreateInitial(grounded: true);
 
 	private bool _initialized;
 
@@ -41,6 +43,7 @@ public partial class PlayerCharacter : CharacterBody3D
 
 	public bool Grounded => IsOnFloor();
 	public bool CanJump => !_jumpLocked;
+	public LocomotionMode CurrentLocomotionMode => _locomotionState.Mode;
 
 	public Camera3D? LocalCamera => _camera;
 	public Vector3 RenderCorrectionOffset => _renderOffset;
@@ -270,6 +273,11 @@ public partial class PlayerCharacter : CharacterBody3D
 		_groundedOverrideValue = grounded;
 	}
 
+	public void ResetLocomotionFromAuthoritative(bool grounded)
+	{
+		_locomotionState = LocomotionState.CreateInitial(grounded);
+	}
+
 	public bool TryConsumeGroundedOverride(out bool grounded)
 	{
 		if (_groundedOverrideValid)
@@ -281,6 +289,16 @@ public partial class PlayerCharacter : CharacterBody3D
 
 		grounded = false;
 		return false;
+	}
+
+	internal LocomotionState GetLocomotionState()
+	{
+		return _locomotionState;
+	}
+
+	internal void SetLocomotionState(in LocomotionState state)
+	{
+		_locomotionState = state;
 	}
 
 	private static Vector3 ClampMagnitude(Vector3 value, float maxLength)

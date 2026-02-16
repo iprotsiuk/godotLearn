@@ -346,6 +346,7 @@ public partial class NetSession
         Vector3 before = _localCharacter.GlobalPosition;
         _localCharacter.GlobalPosition = snapshot.Pos;
         _localCharacter.Velocity = snapshot.Vel;
+        _localCharacter.ResetLocomotionFromAuthoritative(snapshot.Grounded);
         _localCharacter.SetGroundedOverride(snapshot.Grounded);
 
         if (snapshot.LastProcessedSeqForThatClient > _lastAckedSeq)
