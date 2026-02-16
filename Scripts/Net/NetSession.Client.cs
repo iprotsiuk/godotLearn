@@ -12,6 +12,8 @@ public partial class NetSession
     private const float SessionJitterEwmaAlpha = 0.1f;
     private const float MaxInterpHoldOrExtrapMs = 100.0f;
     private const float InterpGapJumpMeters = 2.5f;
+    private const float ReconcileDeadzoneXZMeters = 0.003f;
+    private const float ReconcileDeadzoneYMeters = 0.003f;
 
     private void ClientConnectedToServer()
     {
@@ -263,6 +265,7 @@ public partial class NetSession
 
         long localNowUsec = GetLocalUsec();
         double localNowSec = localNowUsec / 1_000_000.0;
+        _lastAuthoritativeSnapshotAtSec = localNowSec;
         ObserveAuthoritativeServerTick(serverTick, localNowUsec);
         _server_sim_tick = serverTick;
         _lastAuthoritativeServerTick = serverTick;
@@ -349,6 +352,22 @@ public partial class NetSession
         float corrXZ = new Vector2(correctionDelta.X, correctionDelta.Z).Length();
         float corrY = Mathf.Abs(correctionDelta.Y);
         float corr3D = correctionDelta.Length();
+        bool ignoreSmallXZ = corrXZ < ReconcileDeadzoneXZMeters;
+        bool ignoreSmallY = corrY < ReconcileDeadzoneYMeters;
+        if (ignoreSmallXZ)
+        {
+            correctionDelta.X = 0.0f;
+            correctionDelta.Z = 0.0f;
+            corrXZ = 0.0f;
+        }
+
+        if (ignoreSmallY)
+        {
+            correctionDelta.Y = 0.0f;
+            corrY = 0.0f;
+        }
+
+        corr3D = correctionDelta.Length();
         _lastCorrectionXZMeters = corrXZ;
         _lastCorrectionYMeters = corrY;
         _lastCorrection3DMeters = corr3D;
@@ -543,26 +562,52 @@ public partial class NetSession
         uint estimatedTick = _netClock.GetEstimatedServerTick(nowUsec);
         int tickErrorSigned = (int)estimatedTick - (int)_lastAuthoritativeServerTick;
         int tickError = Mathf.Abs(tickErrorSigned);
-        if (tickError > 4)
+        if (tickError <= 4)
         {
-            double nowSec = nowUsec / 1_000_000.0;
-            bool inJoinGrace = _clientWelcomeTimeSec > 0.0 && nowSec < (_clientWelcomeTimeSec + ClientResyncJoinGraceSec);
-            if (inJoinGrace && reason == "tick_drift_guard")
+            _tickDriftGuardBreachCount = 0;
+            return;
+        }
+
+        double nowSec = nowUsec / 1_000_000.0;
+        bool inJoinGrace = _clientWelcomeTimeSec > 0.0 && nowSec < (_clientWelcomeTimeSec + ClientResyncJoinGraceSec);
+        if (inJoinGrace && reason == "tick_drift_guard")
+        {
+            _netClock.NudgeTowardServerTick(_lastAuthoritativeServerTick, nowUsec, 1);
+            _resyncSuppressedDuringJoinCount++;
+            if (nowSec >= _nextResyncDiagLogAtSec)
             {
-                _netClock.NudgeTowardServerTick(_lastAuthoritativeServerTick, nowUsec, 1);
-                _resyncSuppressedDuringJoinCount++;
-                if (nowSec >= _nextResyncDiagLogAtSec)
-                {
-                    _nextResyncDiagLogAtSec = nowSec + JoinDiagnosticsLogIntervalSec;
-                    GD.Print(
-                        $"RESYNC_SUPPRESSED: reason={reason} tickError={tickErrorSigned} targetTick={_lastAuthoritativeServerTick} " +
-                        $"suppressedCount={_resyncSuppressedDuringJoinCount}");
-                }
+                _nextResyncDiagLogAtSec = nowSec + JoinDiagnosticsLogIntervalSec;
+                GD.Print(
+                    $"RESYNC_SUPPRESSED: reason={reason} tickError={tickErrorSigned} targetTick={_lastAuthoritativeServerTick} " +
+                    $"suppressedCount={_resyncSuppressedDuringJoinCount}");
+            }
+            return;
+        }
+
+        if (reason == "tick_drift_guard")
+        {
+            _netClock.NudgeTowardServerTick(_lastAuthoritativeServerTick, nowUsec, 1);
+            _tickDriftGuardBreachCount++;
+            double snapshotAgeSec = _lastAuthoritativeSnapshotAtSec > 0.0
+                ? nowSec - _lastAuthoritativeSnapshotAtSec
+                : double.MaxValue;
+
+            // If snapshots are stale, avoid repeatedly hard-snapping to an old authoritative tick.
+            if (snapshotAgeSec > 0.25)
+            {
                 return;
             }
 
-            TriggerClientResync(reason, _lastAuthoritativeServerTick);
+            if (_tickDriftGuardBreachCount < 3 || tickError < 8 || nowSec < _nextHardResyncAllowedAtSec)
+            {
+                return;
+            }
+
+            _nextHardResyncAllowedAtSec = nowSec + 0.5;
+            _tickDriftGuardBreachCount = 0;
         }
+
+        TriggerClientResync(reason, _lastAuthoritativeServerTick);
     }
 
     private void TriggerClientResync(string reason, uint targetServerTick)

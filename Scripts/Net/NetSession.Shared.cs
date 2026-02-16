@@ -207,6 +207,18 @@ public partial class NetSession
             _tickErrorTicks = (int)estimatedNow - (int)_lastAuthoritativeServerTick;
         }
 
+        if (IsClient)
+        {
+            double nowSec = Time.GetTicksMsec() / 1000.0;
+            _snapshotAgeMs = _lastAuthoritativeSnapshotAtSec > 0.0
+                ? (float)((nowSec - _lastAuthoritativeSnapshotAtSec) * 1000.0)
+                : -1.0f;
+        }
+        else
+        {
+            _snapshotAgeMs = -1.0f;
+        }
+
         UpdateDropFutureRate(Time.GetTicksMsec() / 1000.0);
         UpdateCorrectionRate(Time.GetTicksMsec() / 1000.0);
 
@@ -281,6 +293,7 @@ public partial class NetSession
             SimLossPercent = _simLoss,
             DynamicInterpolationDelayMs = dynamicInterpDelayMs,
             SessionJitterEstimateMs = sessionSnapshotJitterMs,
+            SnapshotAgeMs = _snapshotAgeMs,
             TickErrorTicks = _tickErrorTicks,
             ClientSendTick = _client_send_tick > 0 ? _client_send_tick - 1 : 0,
             DropFutureRatePerSec = _dropFutureRatePerSec,

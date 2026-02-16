@@ -109,6 +109,7 @@ public struct SessionMetrics
     public float SimLossPercent;
     public float DynamicInterpolationDelayMs;
     public float SessionJitterEstimateMs;
+    public float SnapshotAgeMs;
     public int TickErrorTicks;
     public uint ClientSendTick;
     public float DropFutureRatePerSec;

@@ -51,11 +51,7 @@ public sealed class NetClock
 
         int estimatedNow = (int)GetEstimatedServerTick(localUsec);
         int errorTicks = (int)serverTick - estimatedNow;
-        int correctionTicks = 0;
-        if (errorTicks > 0)
-        {
-            correctionTicks = errorTicks > 1 ? 1 : errorTicks;
-        }
+        int correctionTicks = System.Math.Clamp(errorTicks, -1, 1);
         _syncServerTick = estimatedNow + correctionTicks;
         _syncLocalUsec = localUsec;
     }

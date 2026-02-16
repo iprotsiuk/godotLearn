@@ -26,7 +26,7 @@ public static class NetConstants
     public const int SnapshotPacketBytes = 6 + (SnapshotStateBytes * MaxPlayers);
     public const int ControlPacketBytes = 96;
 
-    public const int MinWanInputDelayTicks = 3;
+    public const int MinWanInputDelayTicks = 2;
     public const int MaxWanInputDelayTicks = 10;
     public const float WanInputSafetyMs = 20.0f;
     public const float WanInputJitterScale = 1.0f;

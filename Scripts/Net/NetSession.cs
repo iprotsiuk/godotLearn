@@ -132,6 +132,10 @@ public partial class NetSession : Node
     private float _sessionSnapshotJitterEwmaMs;
     private double _lastSnapshotArrivalTimeSec;
     private bool _hasSnapshotArrivalTimeSec;
+    private double _lastAuthoritativeSnapshotAtSec;
+    private double _nextHardResyncAllowedAtSec;
+    private int _tickDriftGuardBreachCount;
+    private float _snapshotAgeMs;
     private ushort _pingSeq;
     private double _nextPingTimeSec;
     private readonly Dictionary<ushort, double> _pingSent = new();
@@ -246,6 +250,8 @@ public partial class NetSession : Node
 
         if (IsClient)
         {
+            // Sample gameplay movement input in the same fixed-step loop used for prediction/simulation.
+            CaptureInputState();
             TickClient((float)delta);
         }
 
@@ -263,12 +269,6 @@ public partial class NetSession : Node
         if (_mode == RunMode.None)
         {
             return;
-        }
-
-        // Dedicated server runs authoritative simulation only and must not poll local gameplay input.
-        if (IsClient)
-        {
-            CaptureInputState();
         }
 
         UpdateRemoteInterpolation();
@@ -425,6 +425,10 @@ public partial class NetSession : Node
         _sessionSnapshotJitterEwmaMs = 0.0f;
         _lastSnapshotArrivalTimeSec = 0.0;
         _hasSnapshotArrivalTimeSec = false;
+        _lastAuthoritativeSnapshotAtSec = 0.0;
+        _nextHardResyncAllowedAtSec = 0.0;
+        _tickDriftGuardBreachCount = 0;
+        _snapshotAgeMs = -1.0f;
         _pingSeq = 0;
         _nextPingTimeSec = 0.0;
         _nextServerDiagnosticsLogAtSec = 0.0;
