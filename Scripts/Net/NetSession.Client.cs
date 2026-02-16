@@ -419,6 +419,12 @@ public partial class NetSession
         {
             int viewSmoothMs = Mathf.Min(40, _config.ReconciliationSmoothMs);
             _localCharacter.AddViewCorrection(viewOffset, viewSmoothMs);
+            if (_logControlPackets && rawCorrY > 0.0005f)
+            {
+                GD.Print(
+                    $"ReconcileViewDiag: serverTick={_lastAuthoritativeServerTick} ack={_lastAckedSeq} " +
+                    $"rawDeltaY={rawDelta.Y:0.####} rawCorrY={rawCorrY:0.####} smoothMs={viewSmoothMs}");
+            }
         }
     }
 

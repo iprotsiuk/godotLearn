@@ -180,6 +180,7 @@ public partial class NetSession : Node
     public void SetDebugLogging(bool logControlPackets)
     {
         _logControlPackets = logControlPackets;
+        PlayerMotor.LogFloorSnapDiagnostics = logControlPackets;
     }
     public void ApplyLocalViewSettings(float mouseSensitivity, bool invertLookY, float localFov)
     {
