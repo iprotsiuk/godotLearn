@@ -1,0 +1,59 @@
+[gd_scene format=3 uid="uid://5hivdekocii3"]
+
+[ext_resource type="Script" uid="uid://dvcupp00hjv6q" path="res://Scripts/Player/PlayerCharacter.cs" id="1_player"]
+[ext_resource type="Texture2D" uid="uid://cmelxmifgd5da" path="res://addons/kenney_prototype_textures/green/texture_04.png" id="2_q1ate"]
+[ext_resource type="Texture2D" uid="uid://c6dxki3vmvwcl" path="res://addons/kenney_prototype_textures/purple/texture_01.png" id="3_cn5ci"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
+radius = 0.35
+height = 1.1
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_obv64"]
+albedo_texture = ExtResource("2_q1ate")
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_1"]
+radius = 0.35
+height = 1.1
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ocib6"]
+albedo_texture = ExtResource("3_cn5ci")
+
+[sub_resource type="SphereMesh" id="SphereMesh_1"]
+radius = 0.18
+height = 0.36
+
+[node name="PlayerCharacter" type="CharacterBody3D" unique_id=2057722884]
+script = ExtResource("1_player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1461386454]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_1")
+
+[node name="VisualRoot" type="Node3D" parent="." unique_id=643563557]
+
+[node name="VisualYawRoot" type="Node3D" parent="VisualRoot" unique_id=276347411]
+
+[node name="ModelRoot" type="Node3D" parent="VisualRoot/VisualYawRoot" unique_id=1185347205]
+
+[node name="Body" type="MeshInstance3D" parent="VisualRoot/VisualYawRoot" unique_id=1138718900]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+material_override = SubResource("StandardMaterial3D_obv64")
+mesh = SubResource("CapsuleMesh_1")
+
+[node name="VisualPitchRoot" type="Node3D" parent="VisualRoot/VisualYawRoot" unique_id=1299986587]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.55, 0)
+
+[node name="Head" type="MeshInstance3D" parent="VisualRoot/VisualYawRoot/VisualPitchRoot" unique_id=1757913860]
+material_override = SubResource("StandardMaterial3D_ocib6")
+mesh = SubResource("SphereMesh_1")
+
+[node name="CameraYawRoot" type="Node3D" parent="." unique_id=1896523288]
+
+[node name="CameraPitchRoot" type="Node3D" parent="CameraYawRoot" unique_id=1095877760]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.55, 0)
+
+[node name="HandsRoot" type="Node3D" parent="CameraYawRoot/CameraPitchRoot" unique_id=963241690]
+
+[node name="Camera3D" type="Camera3D" parent="CameraYawRoot/CameraPitchRoot" unique_id=1828758381]
+fov = 90.0
+far = 500.0

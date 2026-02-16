@@ -108,25 +108,38 @@ public partial class PlayerCharacter : CharacterBody3D
 		_visualYawRoot.AddChild(_bodyMesh);
 		_visualPitchRoot.AddChild(_headMesh);
 
-			if (withCamera)
+		const int OFF = 2;
+		_visualRoot.Set("physics_interpolation_mode", OFF);
+		_visualYawRoot.Set("physics_interpolation_mode", OFF);
+		_visualPitchRoot.Set("physics_interpolation_mode", OFF);
+		_cameraYawRoot.Set("physics_interpolation_mode", OFF);
+		_cameraPitchRoot.Set("physics_interpolation_mode", OFF);
+
+		// Remote render entities are fully updated in _Process, so avoid engine interpolation on the root.
+		if (!withCamera)
+		{
+			Set("physics_interpolation_mode", OFF);
+		}
+
+		if (withCamera)
+		{
+			_camera = new Camera3D
 			{
-				_camera = new Camera3D
-				{
 				Current = true,
 				Position = Vector3.Zero,
 				Near = 0.05f,
 				Far = 500.0f,
 				Fov = localCameraFov
-				};
+			};
 
-				_cameraPitchRoot.AddChild(_camera);
-				_bodyMesh.Visible = false;
-				_headMesh.Visible = false;
+			_cameraPitchRoot.AddChild(_camera);
+			_bodyMesh.Visible = false;
+			_headMesh.Visible = false;
 
-				// Keep interpolation on for parent transforms (body/world motion), but disable it on the
-				// camera node itself because we apply local view/correction offsets each render frame.
-				_camera.Set("physics_interpolation_mode", 2);
-			}
+			// Keep interpolation on for parent transforms (body/world motion), but disable it on the
+			// camera node itself because we apply local view/correction offsets each render frame.
+			_camera.Set("physics_interpolation_mode", OFF);
+		}
 
 		_initialized = true;
 	}
