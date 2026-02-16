@@ -7,7 +7,6 @@ namespace NetRunnerSlice.Player;
 public partial class PlayerCharacter : CharacterBody3D
 {
 	private const float MinSmoothSec = 0.01f;
-	private const float MaxCorrectionStepPerFrame = 0.35f;
 	private const float MaxQueuedCorrection = 2.0f;
 	private const float MaxCorrectionSpeed = 100.0f;
 
@@ -48,7 +47,7 @@ public partial class PlayerCharacter : CharacterBody3D
 	public Vector3 ViewCorrectionOffset => _viewOffset;
 	public Vector3 CameraCorrectionOffset => _camera is null ? Vector3.Zero : _cameraYawRoot.Position;
 
-	public void Setup(int peerId, bool withCamera, Color tint)
+	public void Setup(int peerId, bool withCamera, Color tint, float localCameraFov = 90.0f)
 	{
 		if (_initialized)
 		{
@@ -117,7 +116,7 @@ public partial class PlayerCharacter : CharacterBody3D
 				Position = Vector3.Zero,
 				Near = 0.05f,
 				Far = 500.0f,
-				Fov = 90.0f
+				Fov = localCameraFov
 				};
 
 				_cameraPitchRoot.AddChild(_camera);
@@ -151,7 +150,7 @@ public partial class PlayerCharacter : CharacterBody3D
 				Mathf.Max(MinSmoothSec, _renderSmoothSec),
 				MaxCorrectionSpeed,
 				dt);
-			_renderOffset = ClampStep(_renderOffset, next, MaxCorrectionStepPerFrame);
+			_renderOffset = next;
 			_visualRoot.Position = _renderOffset;
 		}
 
@@ -174,7 +173,7 @@ public partial class PlayerCharacter : CharacterBody3D
 				Mathf.Max(MinSmoothSec, _viewSmoothSec),
 				MaxCorrectionSpeed,
 				dt);
-			_viewOffset = ClampStep(_viewOffset, next, MaxCorrectionStepPerFrame);
+			_viewOffset = next;
 		}
 
 		// Keep local camera aligned with the same smoothed XZ render correction as the visual body.
@@ -281,18 +280,6 @@ public partial class PlayerCharacter : CharacterBody3D
 		}
 
 		return value.Normalized() * maxLength;
-	}
-
-	private static Vector3 ClampStep(Vector3 current, Vector3 next, float maxStep)
-	{
-		Vector3 delta = next - current;
-		float length = delta.Length();
-		if (length <= maxStep || length <= 0.000001f)
-		{
-			return next;
-		}
-
-		return current + (delta / length) * maxStep;
 	}
 
 	private static Vector3 SmoothDamp(

@@ -128,27 +128,31 @@ public partial class NetSession
 
         int generatedCount = 0;
         int packetCount = 0;
+        uint firstGeneratedSeq = 0;
+        uint lastGeneratedSeq = 0;
         while (_client_send_tick <= desired_horizon_tick)
         {
-            while (_client_send_tick <= desired_horizon_tick)
+            InputCommand command = BuildInputCommandForTick(_client_send_tick);
+            _pendingInputs.Add(command);
+            if (generatedCount == 0)
             {
-                InputCommand command = BuildInputCommandForTick(_client_send_tick);
-                _pendingInputs.Add(command);
-                if (_pendingInputs.Count >= NetConstants.PendingInputHardCap)
-                {
-                    TriggerClientResync("pending_cap_guard", _lastAuthoritativeServerTick);
-                    return generatedCount;
-                }
-
-                if (allowPrediction && _localCharacter is not null)
-                {
-                    _localCharacter.SetLook(command.Yaw, command.Pitch);
-                    PlayerMotor.Simulate(_localCharacter, command, _config);
-                }
-
-                _client_send_tick++;
-                generatedCount++;
+                firstGeneratedSeq = command.Seq;
             }
+            lastGeneratedSeq = command.Seq;
+            if (_pendingInputs.Count >= NetConstants.PendingInputHardCap)
+            {
+                TriggerClientResync("pending_cap_guard", _lastAuthoritativeServerTick);
+                return generatedCount;
+            }
+
+            if (allowPrediction && _localCharacter is not null)
+            {
+                _localCharacter.SetLook(command.Yaw, command.Pitch);
+                PlayerMotor.Simulate(_localCharacter, command, _config);
+            }
+
+            _client_send_tick++;
+            generatedCount++;
 
             int sendCount = _pendingInputs.GetLatest(NetConstants.MaxInputRedundancy, _inputSendScratch.AsSpan(), _nextInputSeq);
             if (sendCount <= 0)
@@ -157,9 +161,6 @@ public partial class NetSession
             }
 
             NetCodec.WriteInputBundle(_inputPacket, _inputSendScratch.AsSpan(0, sendCount));
-            uint newestSeq = _inputSendScratch[0].Seq;
-            uint oldestSeq = _inputSendScratch[sendCount - 1].Seq;
-            GD.Print($"InputSendDiag: seq_range={oldestSeq}..{newestSeq} sendCount={sendCount}");
             if (_mode == RunMode.ListenServer)
             {
                 HandleInputBundle(_localPeerId, _inputPacket);
@@ -174,6 +175,11 @@ public partial class NetSession
             {
                 break;
             }
+        }
+
+        if (generatedCount > 1)
+        {
+            GD.Print($"InputSendDiag: generated={generatedCount} packets={packetCount} seq_range={firstGeneratedSeq}..{lastGeneratedSeq}");
         }
 
         return generatedCount;
@@ -355,26 +361,26 @@ public partial class NetSession
 
         _localCharacter.SetLook(_lookYaw, _lookPitch);
         Vector3 after = _localCharacter.GlobalPosition;
-        Vector3 correctionDelta = before - after;
-        float corrXZ = new Vector2(correctionDelta.X, correctionDelta.Z).Length();
-        float corrY = Mathf.Abs(correctionDelta.Y);
-        float corr3D = correctionDelta.Length();
-        bool ignoreSmallXZ = corrXZ < ReconcileDeadzoneXZMeters;
-        bool ignoreSmallY = corrY < ReconcileDeadzoneYMeters;
+        Vector3 rawDelta = before - after;
+        float rawCorrXZ = new Vector2(rawDelta.X, rawDelta.Z).Length();
+        float rawCorrY = Mathf.Abs(rawDelta.Y);
+        Vector3 metricDelta = rawDelta;
+        bool ignoreSmallXZ = rawCorrXZ < ReconcileDeadzoneXZMeters;
+        bool ignoreSmallY = rawCorrY < ReconcileDeadzoneYMeters;
         if (ignoreSmallXZ)
         {
-            correctionDelta.X = 0.0f;
-            correctionDelta.Z = 0.0f;
-            corrXZ = 0.0f;
+            metricDelta.X = 0.0f;
+            metricDelta.Z = 0.0f;
         }
 
         if (ignoreSmallY)
         {
-            correctionDelta.Y = 0.0f;
-            corrY = 0.0f;
+            metricDelta.Y = 0.0f;
         }
 
-        corr3D = correctionDelta.Length();
+        float corrXZ = new Vector2(metricDelta.X, metricDelta.Z).Length();
+        float corrY = Mathf.Abs(metricDelta.Y);
+        float corr3D = metricDelta.Length();
         _lastCorrectionXZMeters = corrXZ;
         _lastCorrectionYMeters = corrY;
         _lastCorrection3DMeters = corr3D;
@@ -384,8 +390,8 @@ public partial class NetSession
             _correctionRateWindowCount++;
         }
 
-        Vector3 renderOffset = new(correctionDelta.X, 0.0f, correctionDelta.Z);
-        bool hardSnapXZ = corrXZ > _config.ReconciliationSnapThreshold;
+        Vector3 renderOffset = new(rawDelta.X, 0.0f, rawDelta.Z);
+        bool hardSnapXZ = rawCorrXZ > _config.ReconciliationSnapThreshold;
         if (hardSnapXZ)
         {
             _localCharacter.ClearRenderCorrection();
@@ -396,8 +402,8 @@ public partial class NetSession
             _localCharacter.AddRenderCorrection(renderOffset, _config.ReconciliationSmoothMs);
         }
 
-        Vector3 viewOffset = new(0.0f, correctionDelta.Y, 0.0f);
-        if (hardSnapXZ || corrY > 0.5f)
+        Vector3 viewOffset = new(0.0f, rawDelta.Y, 0.0f);
+        if (hardSnapXZ || rawCorrY > 0.5f)
         {
             _localCharacter.ClearViewCorrection();
         }
