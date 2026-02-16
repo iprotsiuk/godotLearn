@@ -34,7 +34,8 @@ public partial class NetSession : Node
         public int EffectiveInputDelayTicks;
         public ushort NextPingSeq;
         public double NextPingAtSec;
-        public double DelayDecreaseBlockedUntilSec;
+        public double NextDelayUpdateAtSec;
+        public double NextResyncHintAtSec;
         public uint LastProcessedSeq;
         public InputCommand LastInput;
         public uint DroppedOldInputCount;
@@ -88,6 +89,7 @@ public partial class NetSession : Node
     private NetClock? _netClock;
     private uint _serverTick;
     private uint _clientTick;
+    private uint _lastAuthoritativeServerTick;
     private int _localPeerId;
     private int _snapshotEveryTicks = 3;
     private bool _simEnabled;
@@ -105,6 +107,10 @@ public partial class NetSession : Node
     private float _jitterMs;
     private bool _logControlPackets;
     private float _dynamicInterpolationDelayMs;
+    private int _globalInterpDelayTicks;
+    private int _interpUnderflowExtraTicks;
+    private double _nextInterpDelayStepAtSec;
+    private double _nextInterpUnderflowAdjustAtSec;
     private float _sessionSnapshotJitterEwmaMs;
     private double _lastSnapshotArrivalTimeSec;
     private bool _hasSnapshotArrivalTimeSec;
@@ -116,6 +122,7 @@ public partial class NetSession : Node
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
     private uint _lastSentInputTick;
+    private uint _lastStampedSendTick;
     private uint _lastAckedSeq;
     private uint _inputEpoch = 1;
     private uint _serverDroppedOldInputCount;
@@ -128,6 +135,12 @@ public partial class NetSession : Node
     private int _serverEffectiveDelayTicks = -1;
     private float _serverPeerRttMs = -1.0f;
     private float _serverPeerJitterMs = -1.0f;
+    private int _tickErrorTicks;
+    private float _dropFutureRatePerSec;
+    private double _dropFutureRateWindowStartSec;
+    private uint _dropFutureRateWindowCount;
+    private bool _resyncTriggered;
+    private uint _resyncCount;
     private PlayerCharacter? _localCharacter;
     public bool IsServer => _mode == RunMode.ListenServer || _mode == RunMode.DedicatedServer;
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
@@ -353,10 +366,12 @@ public partial class NetSession : Node
     {
         _mode = RunMode.None;
         _serverTick = 0;
+        _lastAuthoritativeServerTick = 0;
         _clientTick = 0;
         _inputEpoch = 1;
         _nextInputSeq = 0;
         _lastSentInputTick = 0;
+        _lastStampedSendTick = 0;
         _lastAckedSeq = 0;
         _lastCorrectionMeters = 0.0f;
         _lastCorrectionXZMeters = 0.0f;
@@ -365,6 +380,10 @@ public partial class NetSession : Node
         _rttMs = 0.0f;
         _jitterMs = 0.0f;
         _dynamicInterpolationDelayMs = 0.0f;
+        _globalInterpDelayTicks = 0;
+        _interpUnderflowExtraTicks = 0;
+        _nextInterpDelayStepAtSec = 0.0;
+        _nextInterpUnderflowAdjustAtSec = 0.0;
         _sessionSnapshotJitterEwmaMs = 0.0f;
         _lastSnapshotArrivalTimeSec = 0.0;
         _hasSnapshotArrivalTimeSec = false;
@@ -384,6 +403,12 @@ public partial class NetSession : Node
         _serverEffectiveDelayTicks = -1;
         _serverPeerRttMs = -1.0f;
         _serverPeerJitterMs = -1.0f;
+        _tickErrorTicks = 0;
+        _dropFutureRatePerSec = 0.0f;
+        _dropFutureRateWindowStartSec = 0.0;
+        _dropFutureRateWindowCount = 0;
+        _resyncTriggered = false;
+        _resyncCount = 0;
         ClearProjectileVisuals();
         ClearHitIndicator();
         foreach ((Node3D node, _) in _debugDrawNodes)

@@ -103,6 +103,12 @@ public struct SessionMetrics
     public float SimLossPercent;
     public float DynamicInterpolationDelayMs;
     public float SessionJitterEstimateMs;
+    public int TickErrorTicks;
+    public uint SendTick;
+    public float DropFutureRatePerSec;
+    public int PendingInputsCap;
+    public bool ResyncTriggered;
+    public uint ResyncCount;
     public uint ServerDroppedOldInputCount;
     public uint ServerDroppedFutureInputCount;
     public uint ServerTicksUsedBufferedInput;

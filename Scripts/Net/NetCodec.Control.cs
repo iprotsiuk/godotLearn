@@ -80,6 +80,13 @@ public static partial class NetCodec
         WriteInt(packet, 2, delayTicks);
     }
 
+    public static void WriteControlResyncHint(byte[] packet, uint serverTick)
+    {
+        packet[0] = (byte)PacketType.Control;
+        packet[1] = (byte)ControlType.ResyncHint;
+        WriteUInt(packet, 2, serverTick);
+    }
+
     public static bool TryReadControl(ReadOnlySpan<byte> packet, out ControlType type)
     {
         type = 0;
@@ -139,4 +146,6 @@ public static partial class NetCodec
     public static uint ReadControlServerTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 8);
 
     public static int ReadControlDelayTicks(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
+
+    public static uint ReadControlResyncHintTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 2);
 }

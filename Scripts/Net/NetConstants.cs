@@ -30,10 +30,13 @@ public static class NetConstants
     public const int MaxWanInputDelayTicks = 10;
     public const float WanInputSafetyMs = 20.0f;
     public const float WanInputJitterScale = 1.0f;
-    public const double WanDelayDecreaseCooldownSec = 2.0;
+    public const double InputDelayUpdateIntervalSec = 0.25;
     public const float WanDefaultRttMs = 100.0f;
-    public const int MaxFutureInputTicks = 120;
+    public const int MaxFutureInputTicks = 64;
+    public const int MaxPastInputTicks = 32;
     public const int HoldLastInputTicks = 2;
+    public const int MaxMissingBeforeResyncHint = 120;
+    public const int PendingInputHardCap = 256;
     public const float StallEpochThresholdSeconds = 0.2f;
     public const double PingIntervalSec = 0.5;
     public const float RttEwmaAlpha = 0.2f;
@@ -56,5 +59,6 @@ public enum ControlType : byte
     Welcome = 2,
     Ping = 3,
     Pong = 4,
-    DelayUpdate = 5
+    DelayUpdate = 5,
+    ResyncHint = 6
 }

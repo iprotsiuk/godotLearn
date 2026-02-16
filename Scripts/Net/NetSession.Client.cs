@@ -10,6 +10,8 @@ public partial class NetSession
     private const float GlobalInterpJitterScale = 1.0f;
     private const float GlobalInterpMaxExtraMs = 100.0f;
     private const float SessionJitterEwmaAlpha = 0.1f;
+    private const float MaxInterpHoldOrExtrapMs = 100.0f;
+    private const float InterpGapJumpMeters = 2.5f;
 
     private void ClientConnectedToServer()
     {
@@ -31,7 +33,8 @@ public partial class NetSession
             AdvanceInputEpoch(resetTickToServerEstimate: true);
         }
 
-        _clientTick++;
+        _clientTick = GetEstimatedServerTickNow();
+        MaybeResyncClient("tick_drift_guard");
         if (_localCharacter is null)
         {
             return;
@@ -40,6 +43,11 @@ public partial class NetSession
         InputCommand input = BuildInputCommand();
 
         _pendingInputs.Add(input);
+        if (_pendingInputs.Count >= NetConstants.PendingInputHardCap)
+        {
+            TriggerClientResync("pending_cap_guard", _lastAuthoritativeServerTick);
+            return;
+        }
         _localCharacter.SetLook(input.Yaw, input.Pitch);
         PlayerMotor.Simulate(_localCharacter, input, _config);
 
@@ -110,20 +118,7 @@ public partial class NetSession
             return;
         }
 
-        uint estimatedTick = _serverTick;
-        if (_netClock is not null && _netClock.LastServerTick > 0)
-        {
-            double nowSec = Time.GetTicksMsec() / 1000.0;
-            double estimatedServerTime = _netClock.GetEstimatedServerTime(nowSec);
-            estimatedTick = (uint)Mathf.Max(0, Mathf.RoundToInt((float)(estimatedServerTime * _config.ServerTickRate)));
-        }
-
-        if (estimatedTick < _serverTick)
-        {
-            estimatedTick = _serverTick;
-        }
-
-        _clientTick = estimatedTick;
+        _clientTick = GetEstimatedServerTickNow();
         _lastSentInputTick = 0;
     }
 
@@ -148,12 +143,15 @@ public partial class NetSession
             buttons |= InputButtons.JumpPressed;
         }
 
-        uint inputTick = _clientTick + (uint)GetClientInputDelayTicksForStamping();
+        uint estimatedServerTickNow = GetEstimatedServerTickNow();
+        _clientTick = estimatedServerTickNow;
+        uint inputTick = estimatedServerTickNow + (uint)GetClientInputDelayTicksForStamping();
         if (inputTick <= _lastSentInputTick)
         {
             inputTick = _lastSentInputTick + 1;
         }
         _lastSentInputTick = inputTick;
+        _lastStampedSendTick = inputTick;
 
         InputCommand command = new()
         {
@@ -187,13 +185,15 @@ public partial class NetSession
             return;
         }
 
-        double localNowSec = Time.GetTicksMsec() / 1000.0;
-        _netClock?.ObserveServerTick(serverTick, localNowSec, _rttMs);
+        long localNowUsec = GetLocalUsec();
+        double localNowSec = localNowUsec / 1_000_000.0;
+        ObserveAuthoritativeServerTick(serverTick, localNowUsec);
         _serverTick = serverTick;
+        _lastAuthoritativeServerTick = serverTick;
 
         UpdateSessionSnapshotJitter(localNowSec);
 
-        double snapshotServerTime = serverTick / (double)_config.ServerTickRate;
+        uint snapshotServerTick = serverTick;
         for (int i = 0; i < count; i++)
         {
             PlayerStateSnapshot state = _snapshotDecodeScratch[i];
@@ -221,7 +221,7 @@ public partial class NetSession
                 Pitch = state.Pitch,
                 Grounded = state.Grounded
             };
-            remote.Buffer.Add(snapshotServerTime, sample);
+            remote.Buffer.Add(snapshotServerTick, sample);
         }
     }
 
@@ -307,21 +307,33 @@ public partial class NetSession
             return;
         }
 
-        double nowSec = Time.GetTicksMsec() / 1000.0;
-        double estimatedServerTimeNow = _netClock.GetEstimatedServerTime(nowSec);
-        double maxExtrap = _config.MaxExtrapolationMs / 1000.0;
-        float baseDelayMs = Mathf.Max(0.0f, _config.InterpolationDelayMs);
-        float extraDelayMs = Mathf.Clamp(
+        long nowUsec = GetLocalUsec();
+        double nowSec = nowUsec / 1_000_000.0;
+        uint estimatedServerTickNow = GetEstimatedServerTickNow();
+        int baseInterpDelayTicks = MsToTicks(Mathf.Max(0.0f, _config.InterpolationDelayMs));
+        int jitterExtraTicks = MsToTicks(Mathf.Clamp(
             GlobalInterpJitterScale * _sessionSnapshotJitterEwmaMs,
             0.0f,
-            GlobalInterpMaxExtraMs);
-        float globalInterpDelayMs = baseDelayMs + extraDelayMs;
-        double renderTime = estimatedServerTimeNow - (globalInterpDelayMs / 1000.0);
+            GlobalInterpMaxExtraMs));
+        int targetInterpDelayTicks = Mathf.Clamp(
+            baseInterpDelayTicks + jitterExtraTicks + _interpUnderflowExtraTicks,
+            0,
+            baseInterpDelayTicks + MsToTicks(GlobalInterpMaxExtraMs) + 32);
+        UpdateGlobalInterpDelayTicks(targetInterpDelayTicks, nowSec);
+        double renderTick = estimatedServerTickNow - _globalInterpDelayTicks;
+        double maxExtrapTicks = MsToTicks(Mathf.Min(_config.MaxExtrapolationMs, (int)MaxInterpHoldOrExtrapMs));
+        bool hadUnderflow = false;
 
         foreach (KeyValuePair<int, RemoteEntity> pair in _remotePlayers)
         {
             RemoteEntity remote = pair.Value;
-            if (!remote.Buffer.TrySample(renderTime, maxExtrap, _config.UseHermiteInterpolation, out RemoteSample sample))
+            if (!remote.Buffer.TrySample(renderTick, maxExtrapTicks, _config.UseHermiteInterpolation, out RemoteSample sample, out bool underflow))
+            {
+                continue;
+            }
+            hadUnderflow |= underflow;
+
+            if (remote.Character.GlobalPosition.DistanceTo(sample.Pos) > InterpGapJumpMeters)
             {
                 continue;
             }
@@ -331,7 +343,8 @@ public partial class NetSession
             remote.Character.SetLook(sample.Yaw, sample.Pitch);
         }
 
-        _dynamicInterpolationDelayMs = globalInterpDelayMs;
+        AdjustInterpUnderflowCompensation(hadUnderflow, nowSec);
+        _dynamicInterpolationDelayMs = TicksToMs(_globalInterpDelayTicks);
     }
 
     private void UpdateSessionSnapshotJitter(double arrivalNowSec)
@@ -349,6 +362,132 @@ public partial class NetSession
 
         _lastSnapshotArrivalTimeSec = arrivalNowSec;
         _hasSnapshotArrivalTimeSec = true;
+    }
+
+    private static long GetLocalUsec()
+    {
+        return (long)Time.GetTicksUsec();
+    }
+
+    private uint GetEstimatedServerTickNow()
+    {
+        long nowUsec = GetLocalUsec();
+        if (_netClock is null || _netClock.LastServerTick == 0)
+        {
+            return _lastAuthoritativeServerTick > 0 ? _lastAuthoritativeServerTick : _serverTick;
+        }
+
+        return _netClock.GetEstimatedServerTick(nowUsec);
+    }
+
+    private void ObserveAuthoritativeServerTick(uint serverTick, long localUsec)
+    {
+        _lastAuthoritativeServerTick = serverTick;
+        _netClock?.ObserveServerTick(serverTick, localUsec);
+    }
+
+    private int MsToTicks(float milliseconds)
+    {
+        float tickMs = 1000.0f / Mathf.Max(1, _config.ServerTickRate);
+        return Mathf.CeilToInt(Mathf.Max(0.0f, milliseconds) / tickMs);
+    }
+
+    private float TicksToMs(int ticks)
+    {
+        if (ticks <= 0)
+        {
+            return 0.0f;
+        }
+
+        float tickMs = 1000.0f / Mathf.Max(1, _config.ServerTickRate);
+        return ticks * tickMs;
+    }
+
+    private void UpdateGlobalInterpDelayTicks(int targetTicks, double nowSec)
+    {
+        if (_globalInterpDelayTicks <= 0)
+        {
+            _globalInterpDelayTicks = targetTicks;
+            _nextInterpDelayStepAtSec = nowSec + NetConstants.InputDelayUpdateIntervalSec;
+            return;
+        }
+
+        if (nowSec < _nextInterpDelayStepAtSec)
+        {
+            return;
+        }
+
+        _nextInterpDelayStepAtSec = nowSec + NetConstants.InputDelayUpdateIntervalSec;
+        int delta = targetTicks - _globalInterpDelayTicks;
+        if (delta > 0)
+        {
+            _globalInterpDelayTicks++;
+        }
+        else if (delta < 0)
+        {
+            _globalInterpDelayTicks--;
+        }
+    }
+
+    private void AdjustInterpUnderflowCompensation(bool hadUnderflow, double nowSec)
+    {
+        if (hadUnderflow)
+        {
+            if (_nextInterpUnderflowAdjustAtSec <= 0.0 || nowSec >= _nextInterpUnderflowAdjustAtSec)
+            {
+                _interpUnderflowExtraTicks++;
+                _nextInterpUnderflowAdjustAtSec = nowSec + 1.0;
+            }
+
+            return;
+        }
+
+        if (_interpUnderflowExtraTicks > 0 && (_nextInterpUnderflowAdjustAtSec <= 0.0 || nowSec >= _nextInterpUnderflowAdjustAtSec))
+        {
+            _interpUnderflowExtraTicks--;
+            _nextInterpUnderflowAdjustAtSec = nowSec + 2.0;
+        }
+    }
+
+    private void MaybeResyncClient(string reason)
+    {
+        if (_mode != RunMode.Client || _netClock is null || _lastAuthoritativeServerTick == 0)
+        {
+            return;
+        }
+
+        uint estimatedTick = _netClock.GetEstimatedServerTick(GetLocalUsec());
+        int tickError = Mathf.Abs((int)estimatedTick - (int)_lastAuthoritativeServerTick);
+        if (tickError > 4)
+        {
+            TriggerClientResync(reason, _lastAuthoritativeServerTick);
+        }
+    }
+
+    private void TriggerClientResync(string reason, uint targetServerTick)
+    {
+        if (_mode != RunMode.Client || _netClock is null || targetServerTick == 0)
+        {
+            return;
+        }
+
+        uint beforeTick = _netClock.GetEstimatedServerTick(GetLocalUsec());
+        int beforeError = (int)beforeTick - (int)targetServerTick;
+        long nowUsec = GetLocalUsec();
+        _netClock.ForceResync(targetServerTick, nowUsec);
+        uint afterTick = _netClock.GetEstimatedServerTick(nowUsec);
+        int afterError = (int)afterTick - (int)targetServerTick;
+
+        _pendingInputs.Clear();
+        _clientTick = targetServerTick;
+        _lastSentInputTick = 0;
+        _lastStampedSendTick = 0;
+        _lastAckedSeq = _nextInputSeq;
+        _localCharacter?.ClearRenderCorrection();
+        _localCharacter?.ClearViewCorrection();
+        _resyncTriggered = true;
+        _resyncCount++;
+        GD.Print($"RESYNC: reason={reason} tickError(before/after)={beforeError}/{afterError} targetTick={targetServerTick}");
     }
 
 }

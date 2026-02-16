@@ -142,12 +142,16 @@ public partial class DebugOverlay : CanvasLayer
             $"Role: {(isServer ? "Server" : "")}{(isServer && isClient ? "/" : "")}{(isClient ? "Client" : "")}" +
             $"\nServer Tick: {metrics.ServerTick}" +
             $"\nClient Tick: {metrics.ClientTick}" +
+            $"\nTick Error: {metrics.TickErrorTicks}" +
+            $"\nSend Tick: {metrics.SendTick}" +
             $"\nRTT: {rttText}" +
             $"\nJitter: {jitterText}" +
             $"\nGlobal Interp Delay: {interpDelayText}" +
             $"\nSession Jitter Estimate: {sessionJitterText}" +
             $"\nLast Acked Seq: {metrics.LastAckedInput}" +
-            $"\nPending Inputs Count: {metrics.PendingInputCount}" +
+            $"\nPending Inputs Count/Cap: {metrics.PendingInputCount}/{metrics.PendingInputsCap}" +
+            $"\nDropFuture Rate (5s): {metrics.DropFutureRatePerSec:0.00}/s" +
+            $"\nRESYNC Triggered/Count: {(metrics.ResyncTriggered ? "Yes" : "No")} / {metrics.ResyncCount}" +
             $"\nJump Repeat Left: {metrics.JumpRepeatRemaining}" +
             $"\nLast Correction XZ/Y/3D (m): {metrics.CorrXZ:0.000} / {metrics.CorrY:0.000} / {metrics.Corr3D:0.000}" +
             $"\nLocal Grounded: {(metrics.LocalGrounded ? "Yes" : "No")}" +

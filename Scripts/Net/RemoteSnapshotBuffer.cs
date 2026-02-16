@@ -9,7 +9,7 @@ public sealed class RemoteSnapshotBuffer
     private const float ArrivalIntervalEwmaAlpha = 0.1f;
     private const float ArrivalJitterEwmaAlpha = 0.2f;
 
-    private readonly double[] _times = new double[Capacity];
+    private readonly uint[] _ticks = new uint[Capacity];
     private readonly RemoteSample[] _samples = new RemoteSample[Capacity];
     private int _count;
     private bool _hasArrivalSample;
@@ -19,17 +19,17 @@ public sealed class RemoteSnapshotBuffer
 
     public float ArrivalJitterEwmaMs => _arrivalJitterEwmaMs;
 
-    public void Add(double serverTime, in RemoteSample sample)
+    public void Add(uint serverTick, in RemoteSample sample)
     {
         if (_count == 0)
         {
-            _times[0] = serverTime;
+            _ticks[0] = serverTick;
             _samples[0] = sample;
             _count = 1;
             return;
         }
 
-        if (serverTime >= _times[_count - 1])
+        if (serverTick >= _ticks[_count - 1])
         {
             if (_count == Capacity)
             {
@@ -37,14 +37,14 @@ public sealed class RemoteSnapshotBuffer
                 _count--;
             }
 
-            _times[_count] = serverTime;
+            _ticks[_count] = serverTick;
             _samples[_count] = sample;
             _count++;
             return;
         }
 
         int insertAt = 0;
-        while (insertAt < _count && _times[insertAt] < serverTime)
+        while (insertAt < _count && _ticks[insertAt] < serverTick)
         {
             insertAt++;
         }
@@ -58,11 +58,11 @@ public sealed class RemoteSnapshotBuffer
 
         for (int i = _count; i > insertAt; i--)
         {
-            _times[i] = _times[i - 1];
+            _ticks[i] = _ticks[i - 1];
             _samples[i] = _samples[i - 1];
         }
 
-        _times[insertAt] = serverTime;
+        _ticks[insertAt] = serverTick;
         _samples[insertAt] = sample;
         _count++;
     }
@@ -107,41 +107,54 @@ public sealed class RemoteSnapshotBuffer
         }
     }
 
-    public bool TrySample(double renderTime, double maxExtrapolation, bool useHermiteInterpolation, out RemoteSample sampled)
+    public bool TrySample(double renderTick, double maxExtrapolationTicks, bool useHermiteInterpolation, out RemoteSample sampled, out bool underflow)
     {
         sampled = default;
+        underflow = false;
         if (_count == 0)
         {
             return false;
         }
 
-        if (_count == 1 || renderTime <= _times[0])
+        if (_count == 1 || renderTick <= _ticks[0])
         {
             sampled = _samples[0];
+            if (_count == 1 && renderTick > _ticks[0])
+            {
+                underflow = true;
+                double dt = renderTick - _ticks[0];
+                if (dt > maxExtrapolationTicks)
+                {
+                    dt = maxExtrapolationTicks;
+                }
+
+                sampled.Pos += sampled.Vel * (float)dt;
+            }
             return true;
         }
 
         for (int i = 0; i < (_count - 1); i++)
         {
-            double aTime = _times[i];
-            double bTime = _times[i + 1];
-            if (renderTime <= bTime)
+            double aTick = _ticks[i];
+            double bTick = _ticks[i + 1];
+            if (renderTick <= bTick)
             {
-                float t = (float)((renderTime - aTime) / (bTime - aTime));
-                float segmentDuration = (float)(bTime - aTime);
+                float t = (float)((renderTick - aTick) / (bTick - aTick));
+                float segmentDuration = (float)(bTick - aTick);
                 sampled = Interpolate(_samples[i], _samples[i + 1], t, segmentDuration, useHermiteInterpolation);
                 return true;
             }
         }
 
         RemoteSample newest = _samples[_count - 1];
-        double dt = renderTime - _times[_count - 1];
-        if (dt > maxExtrapolation)
+        double extrapTicks = renderTick - _ticks[_count - 1];
+        underflow = true;
+        if (extrapTicks > maxExtrapolationTicks)
         {
-            dt = maxExtrapolation;
+            extrapTicks = maxExtrapolationTicks;
         }
 
-        newest.Pos += newest.Vel * (float)dt;
+        newest.Pos += newest.Vel * (float)extrapTicks;
         sampled = newest;
         return true;
     }
@@ -192,7 +205,7 @@ public sealed class RemoteSnapshotBuffer
         int remaining = _count - by;
         for (int i = 0; i < remaining; i++)
         {
-            _times[i] = _times[i + by];
+            _ticks[i] = _ticks[i + by];
             _samples[i] = _samples[i + by];
         }
     }

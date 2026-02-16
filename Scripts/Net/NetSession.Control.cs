@@ -108,11 +108,11 @@ public partial class NetSession
                 _config.FloorSnapLength = Mathf.Clamp(NetCodec.ReadControlFloorSnapLength(packet), 0.0f, 2.0f);
                 _config.GroundStickVelocity = Mathf.Min(NetCodec.ReadControlGroundStickVelocity(packet), -0.01f);
                 _serverTick = NetCodec.ReadControlWelcomeServerTick(packet);
+                _lastAuthoritativeServerTick = _serverTick;
                 GD.Print(
                     $"Welcome applied: MoveSpeed={_config.MoveSpeed:0.###}, GroundAccel={_config.GroundAcceleration:0.###}, InputDelayTicks={_config.ServerInputDelayTicks}");
                 _netClock = new NetClock(_config.ServerTickRate);
-                double welcomeNowSec = Time.GetTicksMsec() / 1000.0;
-                _netClock.ObserveServerTick(_serverTick, welcomeNowSec, _rttMs);
+                _netClock.ObserveServerTick(_serverTick, (long)Time.GetTicksUsec());
                 RebaseClientTickToServerEstimate();
                 _welcomeReceived = true;
                 TrySpawnLocalCharacter();
@@ -143,16 +143,28 @@ public partial class NetSession
                     }
 
                     uint serverTick = NetCodec.ReadControlServerTick(packet);
-                    _netClock?.ObserveServerTick(serverTick, nowSec, _rttMs);
+                    _serverTick = serverTick;
+                    _lastAuthoritativeServerTick = serverTick;
+                    _netClock?.ObserveServerTick(serverTick, (long)Time.GetTicksUsec());
                 }
                 break;
             case ControlType.DelayUpdate:
-                int delayTicks = Mathf.Clamp(NetCodec.ReadControlDelayTicks(packet), 0, NetConstants.MaxWanInputDelayTicks);
+                int delayTicks = Mathf.Clamp(
+                    NetCodec.ReadControlDelayTicks(packet),
+                    0,
+                    Mathf.Min(NetConstants.MaxWanInputDelayTicks, Mathf.Max(0, NetConstants.MaxFutureInputTicks - 2)));
                 if (_config.ServerInputDelayTicks != delayTicks)
                 {
                     _config.ServerInputDelayTicks = delayTicks;
                     GD.Print($"NetSession: DelayUpdate received => InputDelayTicks={delayTicks}");
                 }
+                break;
+            case ControlType.ResyncHint:
+                uint hintServerTick = NetCodec.ReadControlResyncHintTick(packet);
+                _serverTick = hintServerTick;
+                _lastAuthoritativeServerTick = hintServerTick;
+                _netClock?.ObserveServerTick(hintServerTick, (long)Time.GetTicksUsec());
+                TriggerClientResync("server_resync_hint", hintServerTick);
                 break;
         }
     }

@@ -3,38 +3,68 @@ namespace NetRunnerSlice.Net;
 
 public sealed class NetClock
 {
-    private readonly double _serverTickIntervalSec;
-    private double _offsetSec;
+    private readonly int _serverTickRate;
+    private long _syncLocalUsec;
+    private int _syncServerTick;
     private bool _initialized;
 
     public uint LastServerTick { get; private set; }
 
     public NetClock(int serverTickRate)
     {
-        _serverTickIntervalSec = 1.0 / serverTickRate;
+        _serverTickRate = serverTickRate > 0 ? serverTickRate : 1;
     }
 
-    public double GetEstimatedServerTime(double localTimeSec)
+    public uint GetEstimatedServerTick(long localUsec)
     {
-        return localTimeSec + _offsetSec;
-    }
-
-    public void ObserveServerTick(uint serverTick, double localTimeSec, float rttMs)
-    {
-        LastServerTick = serverTick;
-        double serverTimeSec = serverTick * _serverTickIntervalSec;
-        double oneWaySec = (rttMs * 0.5) / 1000.0;
-        double sampleOffset = (serverTimeSec + oneWaySec) - localTimeSec;
-
         if (!_initialized)
         {
-            _offsetSec = sampleOffset;
+            return LastServerTick;
+        }
+
+        long deltaUsec = localUsec - _syncLocalUsec;
+        if (deltaUsec < 0)
+        {
+            deltaUsec = 0;
+        }
+
+        long elapsedTicks = (deltaUsec * _serverTickRate) / 1_000_000L;
+        long estimated = _syncServerTick + elapsedTicks;
+        if (estimated < 0)
+        {
+            return 0;
+        }
+
+        return (uint)estimated;
+    }
+
+    public void ObserveServerTick(uint serverTick, long localUsec)
+    {
+        LastServerTick = serverTick;
+        if (!_initialized)
+        {
+            _syncServerTick = (int)serverTick;
+            _syncLocalUsec = localUsec;
             _initialized = true;
             return;
         }
 
-        // Slew instead of hard-jumping.
-        const double blend = 0.1;
-        _offsetSec += (sampleOffset - _offsetSec) * blend;
+        int estimatedNow = (int)GetEstimatedServerTick(localUsec);
+        int errorTicks = (int)serverTick - estimatedNow;
+        int correctionTicks = 0;
+        if (errorTicks > 0)
+        {
+            correctionTicks = errorTicks > 1 ? 1 : errorTicks;
+        }
+        _syncServerTick = estimatedNow + correctionTicks;
+        _syncLocalUsec = localUsec;
+    }
+
+    public void ForceResync(uint serverTick, long localUsec)
+    {
+        LastServerTick = serverTick;
+        _syncServerTick = (int)serverTick;
+        _syncLocalUsec = localUsec;
+        _initialized = true;
     }
 }

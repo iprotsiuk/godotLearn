@@ -65,20 +65,15 @@ public partial class NetSession
 
 	private uint EstimateServerTickAtFire(float globalInterpDelayMs)
 	{
-		double nowSec = Time.GetTicksMsec() / 1000.0;
-		double estimatedServerTimeNow = (_netClock is not null && _netClock.LastServerTick > 0)
-			? _netClock.GetEstimatedServerTime(nowSec)
-			: (_serverTick / (double)Mathf.Max(1, _config.ServerTickRate));
-
-		double delaySec = globalInterpDelayMs / 1000.0;
-		double viewServerTime = estimatedServerTimeNow - delaySec;
-		double rawViewTick = viewServerTime * _config.ServerTickRate;
-		if (rawViewTick <= 0.0)
+		uint estimatedServerTickNow = GetEstimatedServerTickNow();
+		int delayTicks = MsToTicks(globalInterpDelayMs);
+		int rawViewTick = (int)estimatedServerTickNow - delayTicks;
+		if (rawViewTick <= 0)
 		{
 			return 0;
 		}
 
-		return (uint)Mathf.FloorToInt((float)rawViewTick);
+		return (uint)rawViewTick;
 	}
 
 	private float GetGlobalInterpolationDelayMs()

@@ -144,7 +144,10 @@ public partial class NetSession
 
         int initialDelay = (_mode == RunMode.ListenServer && peerId == _localPeerId)
             ? 0
-            : Mathf.Clamp(_config.ServerInputDelayTicks, NetConstants.MinWanInputDelayTicks, NetConstants.MaxWanInputDelayTicks);
+            : Mathf.Clamp(
+                _config.ServerInputDelayTicks,
+                NetConstants.MinWanInputDelayTicks,
+                Mathf.Min(NetConstants.MaxWanInputDelayTicks, Mathf.Max(0, NetConstants.MaxFutureInputTicks - 2)));
 
         InputCommand seedInput = new()
         {
@@ -189,6 +192,14 @@ public partial class NetSession
 
     private void UpdateMetrics()
     {
+        if (IsClient && _lastAuthoritativeServerTick > 0)
+        {
+            uint estimatedNow = GetEstimatedServerTickNow();
+            _tickErrorTicks = (int)estimatedNow - (int)_lastAuthoritativeServerTick;
+        }
+
+        UpdateDropFutureRate(Time.GetTicksMsec() / 1000.0);
+
         float rttMs = _rttMs;
         float jitterMs = _jitterMs;
         if (_mode == RunMode.ListenServer)
@@ -251,6 +262,12 @@ public partial class NetSession
             SimLossPercent = _simLoss,
             DynamicInterpolationDelayMs = dynamicInterpDelayMs,
             SessionJitterEstimateMs = sessionSnapshotJitterMs,
+            TickErrorTicks = _tickErrorTicks,
+            SendTick = _lastStampedSendTick,
+            DropFutureRatePerSec = _dropFutureRatePerSec,
+            PendingInputsCap = NetConstants.PendingInputHardCap,
+            ResyncTriggered = _resyncTriggered,
+            ResyncCount = _resyncCount,
             ServerDroppedOldInputCount = serverDroppedOldInputCount,
             ServerDroppedFutureInputCount = serverDroppedFutureInputCount,
             ServerTicksUsedBufferedInput = serverTicksUsedBufferedInput,
@@ -262,5 +279,29 @@ public partial class NetSession
             ServerPeerRttMs = serverPeerRttMs,
             ServerPeerJitterMs = serverPeerJitterMs
         };
+    }
+
+    private void UpdateDropFutureRate(double nowSec)
+    {
+        if (_dropFutureRateWindowStartSec <= 0.0)
+        {
+            _dropFutureRateWindowStartSec = nowSec;
+            _dropFutureRateWindowCount = _serverDroppedFutureInputCount;
+            _dropFutureRatePerSec = 0.0f;
+            return;
+        }
+
+        double windowSec = nowSec - _dropFutureRateWindowStartSec;
+        if (windowSec < 5.0)
+        {
+            return;
+        }
+
+        uint delta = _serverDroppedFutureInputCount >= _dropFutureRateWindowCount
+            ? _serverDroppedFutureInputCount - _dropFutureRateWindowCount
+            : _serverDroppedFutureInputCount;
+        _dropFutureRatePerSec = windowSec > 0.001 ? (float)(delta / windowSec) : 0.0f;
+        _dropFutureRateWindowStartSec = nowSec;
+        _dropFutureRateWindowCount = _serverDroppedFutureInputCount;
     }
 }

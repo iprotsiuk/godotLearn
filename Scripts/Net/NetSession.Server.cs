@@ -47,7 +47,9 @@ public partial class NetSession
         float oneWayMs = Mathf.Max(0.0f, rttMs) * 0.5f;
         float totalMs = oneWayMs + NetConstants.WanInputSafetyMs + (Mathf.Max(0.0f, jitterMs) * NetConstants.WanInputJitterScale);
         int delayTicks = Mathf.CeilToInt(totalMs / tickMs);
-        return Mathf.Clamp(delayTicks, NetConstants.MinWanInputDelayTicks, NetConstants.MaxWanInputDelayTicks);
+        int maxAllowedDelay = Mathf.Max(0, NetConstants.MaxFutureInputTicks - 2);
+        int clampedMax = Mathf.Min(NetConstants.MaxWanInputDelayTicks, maxAllowedDelay);
+        return Mathf.Clamp(delayTicks, NetConstants.MinWanInputDelayTicks, clampedMax);
     }
 
     private int GetEffectiveInputDelayTicksForPeer(int peerId, ServerPlayer player)
@@ -71,29 +73,39 @@ public partial class NetSession
         }
 
         int currentDelayTicks = player.EffectiveInputDelayTicks;
-        int nextDelayTicks = GetEffectiveInputDelayTicksForPeer(peerId, player);
-        if (nextDelayTicks > currentDelayTicks)
-        {
-            player.EffectiveInputDelayTicks = nextDelayTicks;
-        }
-        else if (nextDelayTicks < currentDelayTicks)
-        {
-            if (nowSec < player.DelayDecreaseBlockedUntilSec)
-            {
-                nextDelayTicks = currentDelayTicks;
-            }
-            else
-            {
-                player.EffectiveInputDelayTicks = nextDelayTicks;
-                player.DelayDecreaseBlockedUntilSec = nowSec + NetConstants.WanDelayDecreaseCooldownSec;
-            }
-        }
+        int targetDelayTicks = GetEffectiveInputDelayTicksForPeer(peerId, player);
+        targetDelayTicks = Mathf.Clamp(
+            targetDelayTicks,
+            NetConstants.MinWanInputDelayTicks,
+            Mathf.Min(NetConstants.MaxWanInputDelayTicks, Mathf.Max(0, NetConstants.MaxFutureInputTicks - 2)));
 
-        if (player.EffectiveInputDelayTicks == currentDelayTicks)
+        if (nowSec < player.NextDelayUpdateAtSec)
         {
             return;
         }
 
+        player.NextDelayUpdateAtSec = nowSec + NetConstants.InputDelayUpdateIntervalSec;
+        int delta = targetDelayTicks - currentDelayTicks;
+        int nextDelayTicks = currentDelayTicks;
+        if (delta > 0)
+        {
+            nextDelayTicks++;
+        }
+        else if (delta < 0)
+        {
+            nextDelayTicks--;
+        }
+
+        nextDelayTicks = Mathf.Clamp(
+            nextDelayTicks,
+            NetConstants.MinWanInputDelayTicks,
+            Mathf.Min(NetConstants.MaxWanInputDelayTicks, Mathf.Max(0, NetConstants.MaxFutureInputTicks - 2)));
+        if (nextDelayTicks == currentDelayTicks)
+        {
+            return;
+        }
+
+        player.EffectiveInputDelayTicks = nextDelayTicks;
         if (!sendDelayUpdate || (_mode == RunMode.ListenServer && peerId == _localPeerId))
         {
             return;
@@ -256,6 +268,15 @@ public partial class NetSession
                 command.DtFixed = fixedDt;
             }
 
+            if (player.MissingInputStreakCurrent > NetConstants.MaxMissingBeforeResyncHint &&
+                nowSec >= player.NextResyncHintAtSec &&
+                !(_mode == RunMode.ListenServer && peerId == _localPeerId))
+            {
+                NetCodec.WriteControlResyncHint(_controlPacket, _serverTick);
+                SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+                player.NextResyncHintAtSec = nowSec + 0.5;
+            }
+
             player.Character.SetLook(command.Yaw, command.Pitch);
             PlayerMotor.Simulate(player.Character, command, _config);
         }
@@ -353,17 +374,19 @@ public partial class NetSession
                 ResetPeerForEpoch(fromPeer, serverPlayer, command.InputEpoch);
             }
 
-            uint neededTick = _serverTick + 1;
-            if (command.InputTick < neededTick)
-            {
-                serverPlayer.DroppedOldInputCount++;
-                continue;
-            }
-
-            uint maxFutureInputTick = neededTick + (uint)NetConstants.MaxFutureInputTicks;
+            uint maxFutureInputTick = _serverTick + (uint)NetConstants.MaxFutureInputTicks;
             if (command.InputTick > maxFutureInputTick)
             {
                 serverPlayer.DroppedFutureInputCount++;
+                continue;
+            }
+
+            uint minAllowedTick = _serverTick > (uint)NetConstants.MaxPastInputTicks
+                ? _serverTick - (uint)NetConstants.MaxPastInputTicks
+                : 0;
+            if (command.InputTick < minAllowedTick)
+            {
+                serverPlayer.DroppedOldInputCount++;
                 continue;
             }
 

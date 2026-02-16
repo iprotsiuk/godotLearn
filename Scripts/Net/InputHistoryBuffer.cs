@@ -3,7 +3,7 @@ namespace NetRunnerSlice.Net;
 
 public sealed class InputHistoryBuffer
 {
-    private const int Capacity = 1024;
+    private const int Capacity = NetConstants.PendingInputHardCap;
 
     private readonly InputCommand[] _commands = new InputCommand[Capacity];
     private readonly bool[] _valid = new bool[Capacity];
@@ -13,6 +13,7 @@ public sealed class InputHistoryBuffer
     private int _count;
 
     public int Count => _count;
+    public int MaxCapacity => Capacity;
 
     public void Add(in InputCommand command)
     {
