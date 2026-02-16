@@ -19,6 +19,7 @@ public partial class DebugOverlay : CanvasLayer
     private string _profileName = "DEFAULT";
 
     private bool _visible = true;
+    private double _nextStatsRefreshAtSec;
 
     public override void _Ready()
     {
@@ -123,6 +124,14 @@ public partial class DebugOverlay : CanvasLayer
             return;
         }
 
+        double nowSec = Time.GetTicksMsec() / 1000.0;
+        if (nowSec < _nextStatsRefreshAtSec)
+        {
+            return;
+        }
+
+        _nextStatsRefreshAtSec = nowSec + 0.1;
+
         string rttText = metrics.RttMs < 0.0f ? "N/A" : $"{metrics.RttMs:0.0} ms";
         string jitterText = metrics.JitterMs < 0.0f ? "N/A" : $"{metrics.JitterMs:0.0} ms";
         string interpDelayText = metrics.DynamicInterpolationDelayMs < 0.0f
@@ -140,6 +149,7 @@ public partial class DebugOverlay : CanvasLayer
 
         _statsLabel.Text =
             $"Role: {(isServer ? "Server" : "")}{(isServer && isClient ? "/" : "")}{(isClient ? "Client" : "")}" +
+            $"\nFPS: {metrics.FramesPerSecond:0.0}" +
             $"\nServer Sim Tick: {metrics.ServerSimTick}" +
             $"\nClient Est Server Tick: {metrics.ClientEstServerTick}" +
             $"\nTick Error: {metrics.TickErrorTicks}" +
@@ -153,6 +163,7 @@ public partial class DebugOverlay : CanvasLayer
             $"\nDropFuture Rate (5s): {metrics.DropFutureRatePerSec:0.00}/s" +
             $"\nRESYNC Triggered/Count: {(metrics.ResyncTriggered ? "Yes" : "No")} / {metrics.ResyncCount}" +
             $"\nJump Repeat Left: {metrics.JumpRepeatRemaining}" +
+            $"\nNet Correction Magnitude (3D m): {metrics.Corr3D:0.000}" +
             $"\nLast Correction XZ/Y/3D (m): {metrics.CorrXZ:0.000} / {metrics.CorrY:0.000} / {metrics.Corr3D:0.000}" +
             $"\nLocal Grounded: {(metrics.LocalGrounded ? "Yes" : "No")}" +
             $"\nMoveSpeed/GroundAccel: {metrics.MoveSpeed:0.###} / {metrics.GroundAcceleration:0.###}" +

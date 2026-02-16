@@ -251,6 +251,7 @@ public partial class NetSession
         int inputDelayTicksMetric = IsClient ? _appliedInputDelayTicks : _config.ServerInputDelayTicks;
         Metrics = new SessionMetrics
         {
+            FramesPerSecond = (float)Engine.GetFramesPerSecond(),
             ServerSimTick = _server_sim_tick,
             ClientEstServerTick = _client_est_server_tick,
             LastAckedInput = _lastAckedSeq,

@@ -60,6 +60,29 @@ public sealed class NetClock
         _syncLocalUsec = localUsec;
     }
 
+    public void NudgeTowardServerTick(uint serverTick, long localUsec, int maxStepTicks = 1)
+    {
+        if (!_initialized)
+        {
+            ForceResync(serverTick, localUsec);
+            return;
+        }
+
+        LastServerTick = serverTick;
+        int estimatedNow = (int)GetEstimatedServerTick(localUsec);
+        int errorTicks = (int)serverTick - estimatedNow;
+        if (errorTicks == 0)
+        {
+            _syncServerTick = estimatedNow;
+            _syncLocalUsec = localUsec;
+            return;
+        }
+
+        int step = System.Math.Clamp(errorTicks, -System.Math.Max(1, maxStepTicks), System.Math.Max(1, maxStepTicks));
+        _syncServerTick = estimatedNow + step;
+        _syncLocalUsec = localUsec;
+    }
+
     public void ForceResync(uint serverTick, long localUsec)
     {
         LastServerTick = serverTick;

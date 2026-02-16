@@ -113,21 +113,40 @@ public partial class NetSession
                 _lastAuthoritativeServerTick = _server_sim_tick;
                 GD.Print(
                     $"Welcome applied: MoveSpeed={_config.MoveSpeed:0.###}, GroundAccel={_config.GroundAcceleration:0.###}, InputDelayTicks={_config.ServerInputDelayTicks}");
+
+                // Warmup ordering fix: seed the server tick estimate first, then choose first send tick near that
+                // estimate so join warmup cannot backfill ancient ticks from a stale client_send_tick state.
+                long welcomeUsec = (long)Time.GetTicksUsec();
                 _netClock = new NetClock(_config.ServerTickRate);
-                _netClock.ObserveServerTick(_server_sim_tick, (long)Time.GetTicksUsec());
-                RebaseClientTickToServerEstimate();
+                _netClock.ForceResync(_server_sim_tick, welcomeUsec);
+                _client_est_server_tick = _netClock.GetEstimatedServerTick(welcomeUsec);
+                _client_send_tick = 0;
+                _pendingInputs.Clear();
+                _nextInputSeq = 0;
+                _lastAckedSeq = 0;
+                _inputEpoch = 1;
+
                 double welcomeNowSec = Time.GetTicksMsec() / 1000.0;
+                _clientWelcomeTimeSec = welcomeNowSec;
                 _joinInitialInputDelayTicks = _appliedInputDelayTicks;
-                _joinDelayGraceUntilSec = welcomeNowSec + 2.0;
+                _joinDelayGraceUntilSec = welcomeNowSec + ClientResyncJoinGraceSec;
                 _delayTicksNextApplyAtSec = welcomeNowSec;
                 _clientJoinDiagUntilSec = welcomeNowSec + 3.0;
                 _clientNextJoinDiagAtSec = welcomeNowSec;
                 _clientInputCmdsSentSinceLastDiag = 0;
+                uint warmupStartTick = System.Math.Max(_server_sim_tick + 1u, _client_est_server_tick + 1u);
+                if (_client_send_tick < warmupStartTick)
+                {
+                    _client_send_tick = warmupStartTick;
+                }
                 uint desired_horizon_tick = GetDesiredHorizonTick();
                 int warmupSent = SendInputsUpToDesiredHorizon(desired_horizon_tick, allowPrediction: false);
                 _clientInputCmdsSentSinceLastDiag += warmupSent;
+                uint warmupEndTick = warmupSent > 0 ? _client_send_tick - 1 : warmupStartTick;
                 GD.Print(
-                    $"NetSession: Warmup input burst complete. sent={warmupSent} client_send_tick={_client_send_tick} desired_horizon_tick={desired_horizon_tick}");
+                    $"WarmupDiag: warmup_start_tick={warmupStartTick} warmup_end_tick={warmupEndTick} count_sent={warmupSent} " +
+                    $"est_server_tick_at_welcome={_client_est_server_tick} welcome_server_tick={_server_sim_tick} " +
+                    $"client_send_tick={_client_send_tick} desired_horizon_tick={desired_horizon_tick}");
                 _welcomeReceived = true;
                 TrySpawnLocalCharacter();
                 break;

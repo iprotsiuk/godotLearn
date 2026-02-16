@@ -100,7 +100,7 @@ public partial class NetSession
             : GetEstimatedServerTickNow();
 
         uint minSendTick = _client_est_server_tick + 1;
-        if (_client_send_tick == 0)
+        if (_client_send_tick < minSendTick)
         {
             _client_send_tick = minSendTick;
         }
@@ -114,7 +114,7 @@ public partial class NetSession
         }
 
         uint minSendTick = _client_est_server_tick + 1;
-        if (_client_send_tick == 0)
+        if (_client_send_tick < minSendTick)
         {
             _client_send_tick = minSendTick;
         }
@@ -241,7 +241,7 @@ public partial class NetSession
             $"client_send_tick={_client_send_tick} desired_horizon_tick={desired_horizon_tick} horizon_gap={horizonGap} " +
             $"sent_since_last={_clientInputCmdsSentSinceLastDiag}");
         _clientInputCmdsSentSinceLastDiag = 0;
-        _clientNextJoinDiagAtSec = nowSec + 0.1;
+        _clientNextJoinDiagAtSec = nowSec + JoinDiagnosticsLogIntervalSec;
     }
 
     private void HandleSnapshot(byte[] packet)
@@ -533,10 +533,28 @@ public partial class NetSession
             return;
         }
 
-        uint estimatedTick = _netClock.GetEstimatedServerTick(GetLocalUsec());
-        int tickError = Mathf.Abs((int)estimatedTick - (int)_lastAuthoritativeServerTick);
+        long nowUsec = GetLocalUsec();
+        uint estimatedTick = _netClock.GetEstimatedServerTick(nowUsec);
+        int tickErrorSigned = (int)estimatedTick - (int)_lastAuthoritativeServerTick;
+        int tickError = Mathf.Abs(tickErrorSigned);
         if (tickError > 4)
         {
+            double nowSec = nowUsec / 1_000_000.0;
+            bool inJoinGrace = _clientWelcomeTimeSec > 0.0 && nowSec < (_clientWelcomeTimeSec + ClientResyncJoinGraceSec);
+            if (inJoinGrace && reason == "tick_drift_guard")
+            {
+                _netClock.NudgeTowardServerTick(_lastAuthoritativeServerTick, nowUsec, 1);
+                _resyncSuppressedDuringJoinCount++;
+                if (nowSec >= _nextResyncDiagLogAtSec)
+                {
+                    _nextResyncDiagLogAtSec = nowSec + JoinDiagnosticsLogIntervalSec;
+                    GD.Print(
+                        $"RESYNC_SUPPRESSED: reason={reason} tickError={tickErrorSigned} targetTick={_lastAuthoritativeServerTick} " +
+                        $"suppressedCount={_resyncSuppressedDuringJoinCount}");
+                }
+                return;
+            }
+
             TriggerClientResync(reason, _lastAuthoritativeServerTick);
         }
     }
@@ -557,13 +575,25 @@ public partial class NetSession
 
         _pendingInputs.Clear();
         _client_est_server_tick = targetServerTick;
+        uint minSendTick = targetServerTick + 1;
+        if (_client_send_tick < minSendTick)
+        {
+            _client_send_tick = minSendTick;
+        }
 
         _lastAckedSeq = _nextInputSeq;
         _localCharacter?.ClearRenderCorrection();
         _localCharacter?.ClearViewCorrection();
         _resyncTriggered = true;
         _resyncCount++;
-        GD.Print($"RESYNC: reason={reason} tickError(before/after)={beforeError}/{afterError} targetTick={targetServerTick}");
+        double nowSec = nowUsec / 1_000_000.0;
+        if (nowSec >= _nextResyncDiagLogAtSec)
+        {
+            _nextResyncDiagLogAtSec = nowSec + JoinDiagnosticsLogIntervalSec;
+            GD.Print(
+                $"RESYNC: reason={reason} tickError(before/after)={beforeError}/{afterError} targetTick={targetServerTick} " +
+                $"count={_resyncCount} suppressedDuringJoin={_resyncSuppressedDuringJoinCount}");
+        }
     }
 
     private void UpdateAppliedInputDelayTicks()

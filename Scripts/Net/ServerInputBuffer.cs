@@ -15,7 +15,15 @@ public sealed class ServerInputBuffer
 
     public void Store(in InputCommand command)
     {
+#if DEBUG
+        bool hadBefore = TryGetBufferedTickRange(out _, out uint beforeMaxTick);
+#endif
         int idx = (int)(command.InputTick % Capacity);
+
+        if (_valid[idx] && _commands[idx].InputTick > command.InputTick)
+        {
+            return;
+        }
 
         if (_valid[idx] && _commands[idx].InputTick == command.InputTick && _commands[idx].Seq >= command.Seq)
         {
@@ -24,6 +32,14 @@ public sealed class ServerInputBuffer
 
         _commands[idx] = command;
         _valid[idx] = true;
+#if DEBUG
+        if (hadBefore && TryGetBufferedTickRange(out _, out uint afterMaxTick))
+        {
+            System.Diagnostics.Debug.Assert(
+                afterMaxTick >= beforeMaxTick,
+                "ServerInputBuffer max buffered tick regressed after Store.");
+        }
+#endif
     }
 
     public bool TryTake(uint inputTick, out InputCommand command)
@@ -42,6 +58,11 @@ public sealed class ServerInputBuffer
 
     public bool TryGetBufferedTickRange(out uint minTick, out uint maxTick)
     {
+        return TryGetBufferedTickRange(0, out minTick, out maxTick);
+    }
+
+    public bool TryGetBufferedTickRange(uint minInputTickInclusive, out uint minTick, out uint maxTick)
+    {
         bool found = false;
         minTick = 0;
         maxTick = 0;
@@ -53,6 +74,11 @@ public sealed class ServerInputBuffer
             }
 
             uint tick = _commands[i].InputTick;
+            if (tick < minInputTickInclusive)
+            {
+                continue;
+            }
+
             if (!found)
             {
                 minTick = tick;
@@ -73,5 +99,28 @@ public sealed class ServerInputBuffer
         }
 
         return found;
+    }
+
+    public void PruneOlderThan(uint minInputTickInclusive)
+    {
+        for (int i = 0; i < Capacity; i++)
+        {
+            if (_valid[i] && _commands[i].InputTick < minInputTickInclusive)
+            {
+                _valid[i] = false;
+            }
+        }
+
+#if DEBUG
+        for (int i = 0; i < Capacity; i++)
+        {
+            if (_valid[i])
+            {
+                System.Diagnostics.Debug.Assert(
+                    _commands[i].InputTick >= minInputTickInclusive,
+                    "ServerInputBuffer contains stale tick after prune.");
+            }
+        }
+#endif
     }
 }

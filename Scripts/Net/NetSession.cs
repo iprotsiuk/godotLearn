@@ -9,6 +9,8 @@ public partial class NetSession : Node
 {
     private const int RewindHistoryTicks = 120;
     private const double ServerDiagnosticsLogIntervalSec = 2.0;
+    private const double JoinDiagnosticsLogIntervalSec = 0.25;
+    private const double ClientResyncJoinGraceSec = 2.0;
     private const int ClientInputSafetyTicks = 2;
     private const float WeaponMaxRange = 200.0f;
     private const float WeaponTargetRadius = 0.5f;
@@ -140,6 +142,7 @@ public partial class NetSession : Node
     private double _delayTicksNextApplyAtSec;
     private double _joinDelayGraceUntilSec;
     private int _joinInitialInputDelayTicks;
+    private double _clientWelcomeTimeSec;
     private double _clientJoinDiagUntilSec;
     private double _clientNextJoinDiagAtSec;
     private int _clientInputCmdsSentSinceLastDiag;
@@ -160,6 +163,8 @@ public partial class NetSession : Node
     private uint _dropFutureRateWindowCount;
     private bool _resyncTriggered;
     private uint _resyncCount;
+    private uint _resyncSuppressedDuringJoinCount;
+    private double _nextResyncDiagLogAtSec;
     private PlayerCharacter? _localCharacter;
     public bool IsServer => _mode == RunMode.ListenServer || _mode == RunMode.DedicatedServer;
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
@@ -396,6 +401,7 @@ public partial class NetSession : Node
         _delayTicksNextApplyAtSec = 0.0;
         _joinDelayGraceUntilSec = 0.0;
         _joinInitialInputDelayTicks = 0;
+        _clientWelcomeTimeSec = 0.0;
         _clientJoinDiagUntilSec = 0.0;
         _clientNextJoinDiagAtSec = 0.0;
         _clientInputCmdsSentSinceLastDiag = 0;
@@ -435,6 +441,8 @@ public partial class NetSession : Node
         _dropFutureRateWindowCount = 0;
         _resyncTriggered = false;
         _resyncCount = 0;
+        _resyncSuppressedDuringJoinCount = 0;
+        _nextResyncDiagLogAtSec = 0.0;
         ClearProjectileVisuals();
         ClearHitIndicator();
         foreach ((Node3D node, _) in _debugDrawNodes)

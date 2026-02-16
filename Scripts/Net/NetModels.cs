@@ -83,6 +83,7 @@ public struct FireVisual
 
 public struct SessionMetrics
 {
+    public float FramesPerSecond;
     public uint ServerSimTick;
     public uint ClientEstServerTick;
     public uint LastAckedInput;

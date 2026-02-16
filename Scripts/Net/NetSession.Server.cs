@@ -53,7 +53,7 @@ public partial class NetSession
             return;
         }
 
-        bool hasRange = player.Inputs.TryGetBufferedTickRange(out uint minTickBuffered, out uint maxTickBuffered);
+        bool hasRange = player.Inputs.TryGetBufferedTickRange(_server_sim_tick, out uint minTickBuffered, out uint maxTickBuffered);
         int bufferDepth = hasRange ? (int)maxTickBuffered - (int)_server_sim_tick : 0;
         string minTickText = hasRange ? minTickBuffered.ToString() : "none";
         string maxTickText = hasRange ? maxTickBuffered.ToString() : "none";
@@ -62,7 +62,7 @@ public partial class NetSession
             $"min_tick_buffered={minTickText} max_tick_buffered={maxTickText} buffer_depth={bufferDepth} " +
             $"missingStreakCurrent={player.MissingInputStreakCurrent} " +
             $"window120(buffered/hold/neutral)={player.UsageWindowBuffered}/{player.UsageWindowHold}/{player.UsageWindowNeutral}");
-        player.NextJoinDiagAtSec = nowSec + 0.1;
+        player.NextJoinDiagAtSec = nowSec + JoinDiagnosticsLogIntervalSec;
     }
 
     private static void IncrementMissingInputStreak(ServerPlayer player)
@@ -269,6 +269,7 @@ public partial class NetSession
             SendServerPingIfDue(peerId, player, nowSec);
 
             uint neededTick = _server_sim_tick;
+            player.Inputs.PruneOlderThan(neededTick);
             InputCommand command;
             bool usedBufferedInput = false;
             bool usedHoldLast = false;
@@ -450,10 +451,9 @@ public partial class NetSession
                 continue;
             }
 
-            uint minAllowedTick = _server_sim_tick > (uint)NetConstants.MaxPastInputTicks
-                ? _server_sim_tick - (uint)NetConstants.MaxPastInputTicks
-                : 0;
-            if (command.InputTick < minAllowedTick)
+            // Server does not rewind/resimulate movement, so any input older than the
+            // current server simulation tick is obsolete and must be dropped immediately.
+            if (command.InputTick < _server_sim_tick)
             {
                 serverPlayer.DroppedOldInputCount++;
                 continue;
