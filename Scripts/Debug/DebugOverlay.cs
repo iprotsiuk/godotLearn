@@ -20,7 +20,7 @@ public partial class DebugOverlay : CanvasLayer
     private SpinBox? _lossPercent;
     private string _profileName = "DEFAULT";
 
-    private bool _visible = true;
+    private bool _visible = false;
     private double _nextStatsRefreshAtSec;
 
     public override void _Ready()
@@ -42,6 +42,7 @@ public partial class DebugOverlay : CanvasLayer
             CustomMinimumSize = new Vector2(540.0f, 380.0f),
             MouseFilter = Control.MouseFilterEnum.Stop
         };
+        _panel.Visible = _visible;
         root.AddChild(_panel);
 
         VBoxContainer vbox = new()

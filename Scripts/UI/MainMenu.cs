@@ -18,7 +18,7 @@ public partial class MainMenu : Control
 	public delegate void QuitRequestedEventHandler();
 
 	[Signal]
-	public delegate void SettingsAppliedEventHandler(float mouseSensitivity, bool invertLookY, float localFov);
+	public delegate void SettingsAppliedEventHandler(float mouseSensitivity, bool invertLookY, float localFov, int fpsLock);
 
 	private Control? _content;
 	private MainMenuMainScreen? _mainScreen;
@@ -51,6 +51,11 @@ public partial class MainMenu : Control
 	{
 		_settings = settings.Clone();
 		_settingsScreen?.SetSettings(_settings);
+	}
+
+	public void OpenMainScreen()
+	{
+		ShowMainScreen();
 	}
 
 	private void ShowMainScreen()
@@ -93,12 +98,13 @@ public partial class MainMenu : Control
 		_settingsScreen.BackPressed += ShowMainScreen;
 	}
 
-	private void OnSettingsApplyPressed(float sensitivity, bool invertLookY, float localFov)
+	private void OnSettingsApplyPressed(float sensitivity, bool invertLookY, float localFov, int fpsLock)
 	{
 		_settings.MouseSensitivity = Mathf.Clamp(sensitivity, 0.0005f, 0.02f);
 		_settings.InvertLookY = invertLookY;
 		_settings.LocalFov = Mathf.Clamp(localFov, 60.0f, 120.0f);
-		EmitSignal(SignalName.SettingsApplied, _settings.MouseSensitivity, _settings.InvertLookY, _settings.LocalFov);
+		_settings.FpsLock = fpsLock <= 0 ? 0 : fpsLock;
+		EmitSignal(SignalName.SettingsApplied, _settings.MouseSensitivity, _settings.InvertLookY, _settings.LocalFov, _settings.FpsLock);
 	}
 
 	private void ClearContent()

@@ -39,6 +39,7 @@ public partial class Main : Node
         _config = NetworkConfigLoader.Load(configPath);
         _menuSettings = MenuSettingsStore.Load();
         ApplyMenuSettingsToConfig();
+        ApplyFpsLock();
         bool dedicatedMode = _cli.Role == StartupRole.Dedicated;
         if (!dedicatedMode)
         {
@@ -74,6 +75,27 @@ public partial class Main : Node
             return;
         }
         _overlay.Update(_session.Metrics, _session.IsServer, _session.IsClient);
+    }
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (!@event.IsActionPressed("quit"))
+        {
+            return;
+        }
+
+        bool canResumeGameplay = _activeWorld is not null && _session is not null && (_session.IsClient || _session.IsServer);
+        if (canResumeGameplay && _menu is not null && _menu.Visible)
+        {
+            _menu.Hide();
+            Input.MouseMode = Input.MouseModeEnum.Captured;
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        _menu?.OpenMainScreen();
+        _menu?.Show();
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        GetViewport().SetInputAsHandled();
     }
     public override void _ExitTree()
     {
@@ -350,11 +372,13 @@ public partial class Main : Node
     {
         GetTree().Quit();
     }
-    private void OnSettingsApplied(float mouseSensitivity, bool invertLookY, float localFov)
+    private void OnSettingsApplied(float mouseSensitivity, bool invertLookY, float localFov, int fpsLock)
     {
         _menuSettings.MouseSensitivity = mouseSensitivity;
         _menuSettings.InvertLookY = invertLookY;
         _menuSettings.LocalFov = localFov;
+        _menuSettings.FpsLock = fpsLock <= 0 ? 0 : fpsLock;
+        ApplyFpsLock();
         ApplyMenuSettingsToConfig();
         _session?.ApplyLocalViewSettings(
             _menuSettings.MouseSensitivity,
@@ -377,5 +401,9 @@ public partial class Main : Node
         _config.MouseSensitivity = _menuSettings.MouseSensitivity;
         _config.InvertLookY = _menuSettings.InvertLookY;
         _config.LocalFov = _menuSettings.LocalFov;
+    }
+    private void ApplyFpsLock()
+    {
+        Engine.MaxFps = _menuSettings.FpsLock <= 0 ? 0 : _menuSettings.FpsLock;
     }
 }

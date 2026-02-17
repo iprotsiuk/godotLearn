@@ -65,11 +65,11 @@ horizontal_alignment = 2
 layout_mode = 2
 text = "Apply"
 
-[node name="Label" type="Label" parent="." unique_id=62357870]
+[node name="FpsLockLabel" type="Label" parent="." unique_id=62357870]
 layout_mode = 2
 text = "FPS lock"
 
-[node name="OptionButton" type="OptionButton" parent="." unique_id=1934889301]
+[node name="FpsLockOption" type="OptionButton" parent="." unique_id=1934889301]
 layout_mode = 2
 
 [node name="BackButton" type="Button" parent="." unique_id=412894420]
