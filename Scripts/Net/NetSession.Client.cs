@@ -43,6 +43,7 @@ public partial class NetSession
     private void TickClient(float delta)
     {
         ulong nowUsec = (ulong)GetLocalUsec();
+        double nowSec = nowUsec / 1_000_000.0;
         float realDeltaSec = 0.0f;
         if (_lastClientTickUsec != 0)
         {
@@ -54,11 +55,10 @@ public partial class NetSession
         if (realDeltaSec > NetConstants.StallEpochThresholdSeconds)
         {
             AdvanceInputEpoch(resetTickToServerEstimate: true);
-            double stallNowSec = nowUsec / 1_000_000.0;
-            if (stallNowSec >= _nextClientRealtimeStallResyncAtSec)
+            if (nowSec >= _nextClientRealtimeStallResyncAtSec)
             {
                 TriggerClientResync("client_realtime_stall", _lastAuthoritativeServerTick);
-                _nextClientRealtimeStallResyncAtSec = stallNowSec + 0.5;
+                _nextClientRealtimeStallResyncAtSec = nowSec + 0.5;
             }
         }
 
@@ -72,23 +72,25 @@ public partial class NetSession
         MaybeResyncClient("tick_drift_guard");
         UpdateAppliedInputDelayTicks();
 
-        uint safeBaseTick = _lastAuthoritativeServerTick == 0
-            ? _client_est_server_tick
-            : System.Math.Max(_lastAuthoritativeServerTick, _client_est_server_tick);
-        uint maxSafeSendTick = safeBaseTick + (uint)NetConstants.MaxFutureInputTicks - 1;
+        double silenceSec = nowSec - _lastServerTickObsAtSec;
+        bool trustEstimate = silenceSec <= NetConstants.StallEpochThresholdSeconds;
+        uint safeBaseTick = trustEstimate
+            ? System.Math.Max(_lastAuthoritativeServerTick, _client_est_server_tick)
+            : _lastAuthoritativeServerTick;
+        uint maxSafeSendTick = safeBaseTick + (uint)NetConstants.MaxFutureInputTicks;
+        uint lastSentTick = _client_send_tick > 0 ? _client_send_tick - 1 : 0;
 
-        if (_client_send_tick > maxSafeSendTick)
+        if (lastSentTick > maxSafeSendTick)
         {
-            uint resyncTargetTick = _lastAuthoritativeServerTick > 0
-                ? _lastAuthoritativeServerTick
-                : safeBaseTick;
-            TriggerClientResync("future_tick_guard", resyncTargetTick);
+            TriggerClientResync("future_tick_guard", _lastAuthoritativeServerTick);
             _client_est_server_tick = GetEstimatedServerTickNow();
 
-            safeBaseTick = _lastAuthoritativeServerTick == 0
-                ? _client_est_server_tick
-                : System.Math.Max(_lastAuthoritativeServerTick, _client_est_server_tick);
-            maxSafeSendTick = safeBaseTick + (uint)NetConstants.MaxFutureInputTicks - 1;
+            silenceSec = nowSec - _lastServerTickObsAtSec;
+            trustEstimate = silenceSec <= NetConstants.StallEpochThresholdSeconds;
+            safeBaseTick = trustEstimate
+                ? System.Math.Max(_lastAuthoritativeServerTick, _client_est_server_tick)
+                : _lastAuthoritativeServerTick;
+            maxSafeSendTick = safeBaseTick + (uint)NetConstants.MaxFutureInputTicks;
         }
 
         uint desired_horizon_tick = GetDesiredHorizonTick();
@@ -97,9 +99,11 @@ public partial class NetSession
             desired_horizon_tick = maxSafeSendTick;
         }
 
-        if (_localCharacter is not null && desired_horizon_tick < _client_send_tick)
+        if (_client_send_tick > desired_horizon_tick)
         {
-            desired_horizon_tick = _client_send_tick;
+            GD.Print(
+                $"AheadOfHorizon: sendTick={_client_send_tick} horizon={desired_horizon_tick} " +
+                $"est={_client_est_server_tick} lastAuth={_lastAuthoritativeServerTick}");
         }
 
         int sentThisTick = SendInputsUpToDesiredHorizon(desired_horizon_tick, allowPrediction: _localCharacter is not null);
@@ -119,7 +123,6 @@ public partial class NetSession
             return;
         }
 
-        double nowSec = Time.GetTicksMsec() / 1000.0;
         if (nowSec >= _nextPingTimeSec)
         {
             _pingSeq++;
@@ -349,6 +352,7 @@ public partial class NetSession
             : -1.0f;
         _lastAuthoritativeSnapshotAtSec = localNowSec;
         ObserveAuthoritativeServerTick(serverTick, localNowUsec);
+        _lastServerTickObsAtSec = localNowSec;
         _server_sim_tick = serverTick;
         _lastAuthoritativeServerTick = serverTick;
 
@@ -808,10 +812,12 @@ public partial class NetSession
         double snapshotAgeSec = _lastAuthoritativeSnapshotAtSec > 0.0
             ? nowSec - _lastAuthoritativeSnapshotAtSec
             : double.MaxValue;
+        double silenceSec = nowSec - _lastServerTickObsAtSec;
+        bool trustEstimate = silenceSec <= NetConstants.StallEpochThresholdSeconds;
 
         bool replacedTarget = false;
         uint requestedTargetTick = targetServerTick;
-        if (snapshotAgeSec > 0.25)
+        if (snapshotAgeSec > 0.25 && trustEstimate)
         {
             targetServerTick = estNowTick;
             replacedTarget = true;

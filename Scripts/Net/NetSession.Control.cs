@@ -148,6 +148,7 @@ public partial class NetSession
                 _inputEpoch = 1;
 
                 double welcomeNowSec = Time.GetTicksMsec() / 1000.0;
+                _lastServerTickObsAtSec = welcomeNowSec;
                 _clientWelcomeTimeSec = welcomeNowSec;
                 _joinInitialInputDelayTicks = _appliedInputDelayTicks;
                 _joinDelayGraceUntilSec = welcomeNowSec + ClientResyncJoinGraceSec;
@@ -217,6 +218,7 @@ public partial class NetSession
                     _server_sim_tick = serverTick;
                     _lastAuthoritativeServerTick = serverTick;
                     _netClock?.ObserveServerTick(serverTick, (long)Time.GetTicksUsec());
+                    _lastServerTickObsAtSec = nowSec;
                 }
                 break;
             case ControlType.DelayUpdate:
@@ -236,6 +238,7 @@ public partial class NetSession
                 _server_sim_tick = hintServerTick;
                 _lastAuthoritativeServerTick = hintServerTick;
                 _netClock?.ObserveServerTick(hintServerTick, (long)Time.GetTicksUsec());
+                _lastServerTickObsAtSec = Time.GetTicksMsec() / 1000.0;
                 TriggerClientResync("server_resync_hint", hintServerTick);
                 break;
         }

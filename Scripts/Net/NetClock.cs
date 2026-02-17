@@ -1,8 +1,11 @@
 // Scripts/Net/NetClock.cs
+using Godot;
+
 namespace NetRunnerSlice.Net;
 
 public sealed class NetClock
 {
+    public static bool LogSnapClock;
     private readonly int _serverTickRate;
     private long _syncLocalUsec;
     private int _syncServerTick;
@@ -51,7 +54,25 @@ public sealed class NetClock
 
         int estimatedNow = (int)GetEstimatedServerTick(localUsec);
         int errorTicks = (int)serverTick - estimatedNow;
-        int correctionTicks = System.Math.Clamp(errorTicks, -1, 1);
+        int abs = System.Math.Abs(errorTicks);
+        int correctionTicks;
+        if (abs <= 2)
+        {
+            correctionTicks = System.Math.Clamp(errorTicks, -1, 1);
+        }
+        else if (abs <= 8)
+        {
+            correctionTicks = System.Math.Clamp(errorTicks, -2, 2);
+        }
+        else
+        {
+            correctionTicks = errorTicks;
+            if (LogSnapClock)
+            {
+                GD.Print($"NetClockSnap: errorTicks={errorTicks} observedTick={serverTick}");
+            }
+        }
+
         _syncServerTick = estimatedNow + correctionTicks;
         _syncLocalUsec = localUsec;
     }

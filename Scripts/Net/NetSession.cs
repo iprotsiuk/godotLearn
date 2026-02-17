@@ -136,6 +136,7 @@ public partial class NetSession : Node
     private double _lastSnapshotArrivalTimeSec;
     private bool _hasSnapshotArrivalTimeSec;
     private double _lastAuthoritativeSnapshotAtSec;
+    private double _lastServerTickObsAtSec;
     private double _nextHardResyncAllowedAtSec;
     private int _tickDriftGuardBreachCount;
     private float _snapshotAgeMs;
@@ -456,6 +457,7 @@ public partial class NetSession : Node
         _lastSnapshotArrivalTimeSec = 0.0;
         _hasSnapshotArrivalTimeSec = false;
         _lastAuthoritativeSnapshotAtSec = 0.0;
+        _lastServerTickObsAtSec = 0.0;
         _nextHardResyncAllowedAtSec = 0.0;
         _tickDriftGuardBreachCount = 0;
         _snapshotAgeMs = -1.0f;
