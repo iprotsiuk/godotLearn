@@ -45,6 +45,8 @@ Common: first byte is `PacketType`.
   - `yaw` (`float`)
   - `pitch` (`float`)
   - `grounded` (`byte`)
+  - `locomotion` packed fields (`mode`, wall normal XZ, wallrun/slide timers)
+  - See `Docs/NETCODE_STRATEGY.md` for full binary field-level spec.
 
 ### Control/Handshake (`PacketType.Control`, CH2, reliable)
 
@@ -65,7 +67,7 @@ Common: first byte is `PacketType`.
 - Client stores sent inputs in a circular history keyed by sequence.
 - Listen host local player uses the same prediction/reconciliation pipeline (no host-authoritative local bypass).
 - On snapshot for local player:
-  - apply authoritative state,
+  - apply authoritative pos/vel + locomotion state + grounded override,
   - drop acked commands,
   - replay remaining unacked commands.
 - Correction policy:

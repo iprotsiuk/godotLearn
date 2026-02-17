@@ -1,6 +1,7 @@
 // Scripts/Debug/DebugOverlay.cs
 using Godot;
 using NetRunnerSlice.Net;
+using NetRunnerSlice.Player.Locomotion;
 
 namespace NetRunnerSlice.Debug;
 
@@ -180,6 +181,7 @@ public partial class DebugOverlay : CanvasLayer
             $"{metrics.ViewCorrectionOffset.X * 1000.0f:0.0},{metrics.ViewCorrectionOffset.Y * 1000.0f:0.0},{metrics.ViewCorrectionOffset.Z * 1000.0f:0.0} / " +
             $"{metrics.CameraCorrectionOffset.X * 1000.0f:0.0},{metrics.CameraCorrectionOffset.Y * 1000.0f:0.0},{metrics.CameraCorrectionOffset.Z * 1000.0f:0.0}" +
             $"\nLocal Grounded: {(metrics.LocalGrounded ? "Yes" : "No")}" +
+            $"\nLocal Loco Mode/WallRun/Slide: {((LocomotionMode)metrics.LocalLocomotionMode)} / {metrics.LocalWallRunTicksRemaining} / {metrics.LocalSlideTicksRemaining}" +
             $"\nMoveSpeed/GroundAccel: {metrics.MoveSpeed:0.###} / {metrics.GroundAcceleration:0.###}" +
             $"\nServerInputDelayTicks: {metrics.ServerInputDelayTicks}" +
             $"\nServerDiag Drops old/future: {metrics.ServerDroppedOldInputCount} / {metrics.ServerDroppedFutureInputCount}" +

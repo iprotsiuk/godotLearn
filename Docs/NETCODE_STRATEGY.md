@@ -117,11 +117,28 @@ Fields per entity:
 - `yaw` (`float`, radians, authoritative).
 - `pitch` (`float`, radians, authoritative and already clamped server-side).
 - `grounded` (`bool`).
+- `locoMode` (`byte`): packed `LocomotionMode` enum value.
+- `locoWallNormalX` (`sbyte`): quantized wall normal X component in range `[-127, 127]`.
+- `locoWallNormalZ` (`sbyte`): quantized wall normal Z component in range `[-127, 127]`.
+- `locoWallRunTicksRemaining` (`byte`): saturated `0..255`.
+- `locoSlideTicksRemaining` (`byte`): saturated `0..255`.
+
+Locomotion packing rules:
+
+- Wall normal is encoded as XZ only (`Y` is always treated as `0` in net state).
+- Quantization maps `[-1, 1]` to signed byte domain `[-127, 127]` and dequantizes by dividing by `127`.
+- On decode, tiny vectors are treated as zero; otherwise XZ is normalized and `Y` is forced to `0`.
 
 Ack meaning:
 
 - Local client removes pending commands `<= lastProcessedSeqForThatClient`.
 - Remaining pending commands are replayed on top of authoritative state.
+- Reconcile contract for local player is strict order:
+  1) apply authoritative `pos` + `vel`,
+  2) apply authoritative packed locomotion state,
+  3) apply grounded override,
+  4) drop acked inputs,
+  5) replay unacked inputs.
 
 ### Control / Handshake Payload
 

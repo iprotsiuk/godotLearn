@@ -1,6 +1,7 @@
 // Scripts/Net/NetSession.Shared.cs
 using Godot;
 using NetRunnerSlice.Player;
+using NetRunnerSlice.Player.Locomotion;
 
 namespace NetRunnerSlice.Net;
 
@@ -277,6 +278,7 @@ public partial class NetSession
         Vector3 renderCorrectionOffset = _localCharacter?.RenderCorrectionOffset ?? Vector3.Zero;
         Vector3 viewCorrectionOffset = _localCharacter?.ViewCorrectionOffset ?? Vector3.Zero;
         Vector3 cameraCorrectionOffset = _localCharacter?.CameraCorrectionOffset ?? Vector3.Zero;
+        LocomotionState localLocomotionState = _localCharacter?.GetLocomotionState() ?? default;
         Metrics = new SessionMetrics
         {
             FramesPerSecond = (float)Engine.GetFramesPerSecond(),
@@ -296,6 +298,9 @@ public partial class NetSession
             RttMs = rttMs,
             JitterMs = jitterMs,
             LocalGrounded = _localCharacter?.Grounded ?? false,
+            LocalLocomotionMode = (byte)localLocomotionState.Mode,
+            LocalWallRunTicksRemaining = localLocomotionState.WallRunTicksRemaining,
+            LocalSlideTicksRemaining = localLocomotionState.SlideTicksRemaining,
             MoveSpeed = _config.MoveSpeed,
             GroundAcceleration = _config.GroundAcceleration,
             ServerInputDelayTicks = inputDelayTicksMetric,

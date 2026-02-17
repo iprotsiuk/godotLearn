@@ -24,6 +24,7 @@ Always capture before changing code:
 | Sluggish controls | Prediction path not running every physics tick, or input not captured/camera not in local predicted node | `Scripts/Net/NetSession.Client.cs` (`TickClient`), `Scripts/Net/NetSession.cs` (`_UnhandledInput`), `Scripts/Player/PlayerCharacter.cs` | Log per tick: `clientTick`, built `seq`, local pre/post predict position, `pendingInputCount` |
 | Wrong yaw/pitch or remote facing wrong direction | Degrees/radians mismatch, pitch not clamped consistently, yaw not propagated in snapshot | `Scripts/Net/InputSanitizer.cs`, `Scripts/Net/NetSession.Server.cs` (`SetLook`), `Scripts/Net/NetSession.Client.cs` (`UpdateRemoteInterpolation`) | Log input yaw/pitch (rad), server clamped yaw/pitch, snapshot yaw/pitch for same peer |
 | Flying / divergent movement | Invalid inputs accepted, server/client config mismatch, replay mismatch, repeated jump edge from reused input | `Scripts/Net/InputSanitizer.cs`, `Scripts/Net/NetSession.Control.cs` (overrides), `Scripts/Net/NetSession.Client.cs` (`ReconcileLocal`), `Scripts/Player/PlayerMotor.cs` | Log `seq`, `ack`, replay count, correction magnitude, velocity Y before/after reconcile, active config values |
+| Wallrun/slide resets or pops after reconcile | Locomotion net-state not replicated in snapshot or not applied before replay | `Scripts/Net/NetSession.Server.cs` (`BuildSnapshotStates`), `Scripts/Net/NetSession.Client.cs` (`ReconcileLocal`), `Scripts/Net/NetCodec.cs` | Log packed locomotion bytes per snapshot, decoded mode/timers before replay, and post-apply local locomotion state |
 | Jittery remote players | CH1 transfer mode wrong, interpolation delay too low, clock jumps, sparse snapshots | `Scripts/Net/NetSession.Server.cs` (CH1 mode), `Scripts/Net/NetSession.Client.cs` (`renderTime`), `Scripts/Net/NetClock.cs`, `Scripts/Net/RemoteSnapshotBuffer.cs` | Log snapshot arrival `serverTick`, estimated server time, render time, sample interval, extrapolation duration |
 | Rubber-banding forever | Ack not advancing, seq stream drift, strict sequential server policy fed stale/missing expected seqs repeatedly | `Scripts/Net/NetSession.Server.cs` (`LastProcessedSeq`, missing-input fallback), `Scripts/Net/NetSession.Client.cs` (`_lastAckedSeq`, pending replay), `Scripts/Net/NetSession.Control.cs` | Log `lastProcessedSeqForThatClient`, local `_nextInputSeq`, `_lastAckedSeq`, pending count trend over time |
 
@@ -37,6 +38,7 @@ Add temporary `GD.Print` with peer id and tick context in these methods:
   - `ReconcileLocal`
 - `NetSession.Server.cs`:
   - `TickServer`
+  - `BuildSnapshotStates`
   - `HandleInputBundle`
 - `NetSession.Control.cs`:
   - handshake apply path (`ControlType.Welcome`)

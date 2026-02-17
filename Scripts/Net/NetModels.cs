@@ -105,6 +105,9 @@ public struct SessionMetrics
     public float RttMs;
     public float JitterMs;
     public bool LocalGrounded;
+    public byte LocalLocomotionMode;
+    public int LocalWallRunTicksRemaining;
+    public int LocalSlideTicksRemaining;
     public float MoveSpeed;
     public float GroundAcceleration;
     public int ServerInputDelayTicks;
