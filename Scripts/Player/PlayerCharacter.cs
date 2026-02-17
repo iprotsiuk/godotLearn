@@ -118,11 +118,8 @@ public partial class PlayerCharacter : CharacterBody3D
 		_cameraYawRoot.Set("physics_interpolation_mode", OFF);
 		_cameraPitchRoot.Set("physics_interpolation_mode", OFF);
 
-		// Local netcode already applies render smoothing, so keep root interpolation off to avoid double interpolation.
-		Set("physics_interpolation_mode", OFF);
-
-		if (withCamera)
-		{
+			if (withCamera)
+			{
 			_camera = new Camera3D
 			{
 				Current = true,
