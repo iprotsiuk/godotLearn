@@ -472,6 +472,9 @@ public partial class NetSession
 
             if (remote.Character.GlobalPosition.DistanceTo(sample.Pos) > InterpGapJumpMeters)
             {
+                remote.Character.GlobalPosition = sample.Pos;
+                remote.Character.Velocity = sample.Vel;
+                remote.Character.SetLook(sample.Yaw, sample.Pitch);
                 continue;
             }
 

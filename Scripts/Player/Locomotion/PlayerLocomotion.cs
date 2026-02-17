@@ -43,6 +43,9 @@ public static class PlayerLocomotion
 	private const float WallRunIntentMinMoveAxesSq = 0.01f;
 	private const float MinNormalLengthSq = 0.000001f;
 	private const float WallRunStickSpeed = 2.0f;
+	private const float WallProbeChestHeight = 1.05f;
+	private const float WallProbeSideOffset = 0.2f;
+	private const float WallProbeDistance = 0.8f;
 	private const int WallRunReattachCooldownTicks = 8;
 	private static readonly bool EnableWallRun = true;
 	private static readonly bool EnableWallCling = false;
@@ -96,10 +99,9 @@ public static class PlayerLocomotion
 		body.MoveAndSlide();
 
 		bool groundedAfter = body.IsOnFloor();
-		Vector3 wallNormalCandidate = ComputeWallNormalCandidate(body, WallContactMaxAbsY, state.WallNormal);
+		Vector3 wallNormalCandidate = ComputeWallNormalCandidate(body, WallContactMaxAbsY, state.WallNormal, input, velocity);
 		bool hasWallContact = wallNormalCandidate != Vector3.Zero;
-		bool hadAirCooldown = activeMode == LocomotionMode.Air && state.WallRunTicksRemaining > 0;
-		if (hadAirCooldown)
+		if (activeMode == LocomotionMode.Air && state.WallRunTicksRemaining > 0)
 		{
 			state.WallRunTicksRemaining = Mathf.Max(0, state.WallRunTicksRemaining - 1);
 		}
@@ -115,16 +117,18 @@ public static class PlayerLocomotion
 		{
 			nextMode = LocomotionMode.Air;
 			state.WallNormal = Vector3.Zero;
-			state.WallRunTicksRemaining = Mathf.Max(state.WallRunTicksRemaining, wallRunResult.CooldownTicks);
+			state.WallRunTicksRemaining = Mathf.Max(0, wallRunResult.CooldownTicks);
 		}
 		else if (activeMode == LocomotionMode.WallRun)
 		{
+			int remainingWallRunTicks = Mathf.Max(0, state.WallRunTicksRemaining - 1);
 			if (!hasWallContact)
 			{
 				nextMode = LocomotionMode.Air;
 				state.WallNormal = Vector3.Zero;
+				state.WallRunTicksRemaining = 0;
 			}
-			else if (state.WallRunTicksRemaining <= 1)
+			else if (remainingWallRunTicks <= 0)
 			{
 				nextMode = LocomotionMode.Air;
 				state.WallNormal = Vector3.Zero;
@@ -134,10 +138,10 @@ public static class PlayerLocomotion
 			{
 				nextMode = LocomotionMode.WallRun;
 				state.WallNormal = wallNormalCandidate;
-				state.WallRunTicksRemaining = Mathf.Max(0, state.WallRunTicksRemaining - 1);
+				state.WallRunTicksRemaining = remainingWallRunTicks;
 			}
 		}
-		else if (!hadAirCooldown &&
+		else if (state.WallRunTicksRemaining <= 0 &&
 				 activeMode == LocomotionMode.Air &&
 				 hasWallContact &&
 				 config.WallRunMaxTicks > 0 &&
@@ -157,11 +161,15 @@ public static class PlayerLocomotion
 		player.SetLocomotionState(state);
 		player.PostSimUpdate();
 
-		// TODO(parkour): compute dedicated wall sensors here (raycasts/probes) instead of relying on slide normals.
 		return new LocomotionStepResult(wasGrounded, groundedAfter, body.FloorSnapLength, state.Mode);
 	}
 
-	private static Vector3 ComputeWallNormalCandidate(CharacterBody3D body, float maxAbsY, in Vector3 preferredWallNormal)
+	private static Vector3 ComputeWallNormalCandidate(
+		CharacterBody3D body,
+		float maxAbsY,
+		in Vector3 preferredWallNormal,
+		in InputCommand input,
+		in Vector3 velocity)
 	{
 		Vector3 preferred = new(preferredWallNormal.X, 0.0f, preferredWallNormal.Z);
 		bool hasPreferred = preferred.LengthSquared() > MinNormalLengthSq;
@@ -205,7 +213,146 @@ public static class PlayerLocomotion
 			bestNormal = wallNormal;
 		}
 
+		if (bestNormal != Vector3.Zero)
+		{
+			return bestNormal;
+		}
+
+		return ProbeWallNormalCandidate(body, maxAbsY, preferred, hasPreferred, input, velocity);
+	}
+
+	private static Vector3 ProbeWallNormalCandidate(
+		CharacterBody3D body,
+		float maxAbsY,
+		in Vector3 preferredWallNormalXZ,
+		bool hasPreferredWallNormal,
+		in InputCommand input,
+		in Vector3 velocity)
+	{
+		World3D? world = body.GetWorld3D();
+		if (world is null)
+		{
+			return Vector3.Zero;
+		}
+
+		PhysicsDirectSpaceState3D space = world.DirectSpaceState;
+		Vector3 forward = ComputeProbeForward(input, velocity);
+		Vector3 right = Vector3.Up.Cross(forward);
+		if (right.LengthSquared() <= MinNormalLengthSq)
+		{
+			right = Vector3.Right;
+		}
+		else
+		{
+			right = right.Normalized();
+		}
+
+		Vector3 baseOrigin = body.GlobalTransform.Origin + (Vector3.Up * WallProbeChestHeight);
+		Vector3 bestNormal = Vector3.Zero;
+		float bestScore = float.NegativeInfinity;
+
+		if (TryProbeRay(body, space, baseOrigin + (-right * WallProbeSideOffset), -right, maxAbsY, out Vector3 leftNormal, out float leftDistance))
+		{
+			float score = hasPreferredWallNormal
+				? leftNormal.Dot(preferredWallNormalXZ)
+				: -leftDistance;
+			if (score > bestScore)
+			{
+				bestScore = score;
+				bestNormal = leftNormal;
+			}
+		}
+
+		if (TryProbeRay(body, space, baseOrigin + (right * WallProbeSideOffset), right, maxAbsY, out Vector3 rightNormal, out float rightDistance))
+		{
+			float score = hasPreferredWallNormal
+				? rightNormal.Dot(preferredWallNormalXZ)
+				: -rightDistance;
+			if (score > bestScore)
+			{
+				bestScore = score;
+				bestNormal = rightNormal;
+			}
+		}
+
 		return bestNormal;
+	}
+
+	private static bool TryProbeRay(
+		CharacterBody3D body,
+		PhysicsDirectSpaceState3D space,
+		in Vector3 origin,
+		in Vector3 direction,
+		float maxAbsY,
+		out Vector3 wallNormal,
+		out float distance)
+	{
+		Vector3 dir = direction;
+		if (dir.LengthSquared() <= MinNormalLengthSq)
+		{
+			wallNormal = Vector3.Zero;
+			distance = 0.0f;
+			return false;
+		}
+
+		dir = dir.Normalized();
+		Vector3 target = origin + (dir * WallProbeDistance);
+		PhysicsRayQueryParameters3D query = PhysicsRayQueryParameters3D.Create(origin, target, body.CollisionMask);
+		query.CollideWithAreas = false;
+		query.CollideWithBodies = true;
+		query.Exclude = new Godot.Collections.Array<Rid> { body.GetRid() };
+
+		Godot.Collections.Dictionary hit = space.IntersectRay(query);
+		if (hit.Count == 0 || !hit.ContainsKey("normal") || !hit.ContainsKey("position"))
+		{
+			wallNormal = Vector3.Zero;
+			distance = 0.0f;
+			return false;
+		}
+
+		Vector3 normal = (Vector3)hit["normal"];
+		if (Mathf.Abs(normal.Y) >= maxAbsY)
+		{
+			wallNormal = Vector3.Zero;
+			distance = 0.0f;
+			return false;
+		}
+
+		Vector3 projected = new(normal.X, 0.0f, normal.Z);
+		if (projected.LengthSquared() <= MinNormalLengthSq)
+		{
+			wallNormal = Vector3.Zero;
+			distance = 0.0f;
+			return false;
+		}
+
+		Vector3 hitPos = (Vector3)hit["position"];
+		distance = origin.DistanceTo(hitPos);
+		wallNormal = projected.Normalized();
+		return true;
+	}
+
+	private static Vector3 ComputeProbeForward(in InputCommand input, in Vector3 velocity)
+	{
+		Vector2 move = input.MoveAxes;
+		if (move.LengthSquared() > 1.0f)
+		{
+			move = move.Normalized();
+		}
+
+		Vector3 localWish = new(move.X, 0.0f, -move.Y);
+		if (localWish.LengthSquared() > MinNormalLengthSq)
+		{
+			return (new Basis(Vector3.Up, input.Yaw) * localWish).Normalized();
+		}
+
+		Vector3 horizontalVelocity = new(velocity.X, 0.0f, velocity.Z);
+		if (horizontalVelocity.LengthSquared() > MinNormalLengthSq)
+		{
+			return horizontalVelocity.Normalized();
+		}
+
+		return new Vector3(-Mathf.Sin(input.Yaw), 0.0f, -Mathf.Cos(input.Yaw));
 	}
 
 	private static bool IsWallRunIntentActive(in InputCommand input)
