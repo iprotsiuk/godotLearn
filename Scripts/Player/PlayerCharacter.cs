@@ -7,6 +7,8 @@ namespace NetRunnerSlice.Player;
 
 public partial class PlayerCharacter : CharacterBody3D
 {
+	private const string FirstPersonViewRigScenePath = "res://Scenes/Player/FirstPersonViewRig.tscn";
+	private const string ThirdPersonModelScenePath = "res://Scenes/Player/ThirdPersonModel.tscn";
 	private const float MinSmoothSec = 0.01f;
 	private const float MaxQueuedCorrection = 2.0f;
 	private const float MaxCorrectionSpeed = 100.0f;
@@ -17,9 +19,12 @@ public partial class PlayerCharacter : CharacterBody3D
 	private readonly Node3D _cameraYawRoot = new();
 	private readonly Node3D _cameraPitchRoot = new();
 
-	private MeshInstance3D? _bodyMesh;
-	private MeshInstance3D? _headMesh;
+	private Node3D? _firstPersonViewRigRoot;
+	private Node3D? _thirdPersonModelRoot;
 	private Camera3D? _camera;
+	private Color _tint;
+	private bool _withCamera;
+	private float _localCameraFov = 90.0f;
 
 	private Vector3 _renderOffset;
 	private Vector3 _renderVelocity;
@@ -44,6 +49,7 @@ public partial class PlayerCharacter : CharacterBody3D
 	public bool Grounded => IsOnFloor();
 	public bool CanJump => !_jumpLocked;
 	public LocomotionMode CurrentLocomotionMode => _locomotionState.Mode;
+	public Vector3 CurrentWallNormal => _locomotionState.WallNormal;
 
 	public Camera3D? LocalCamera => _camera;
 	public Vector3 RenderCorrectionOffset => _renderOffset;
@@ -58,6 +64,9 @@ public partial class PlayerCharacter : CharacterBody3D
 		}
 
 		PeerId = peerId;
+		_withCamera = withCamera;
+		_tint = tint;
+		_localCameraFov = localCameraFov;
 		CollisionLayer = 2;
 		CollisionMask = 1;
 		UpDirection = Vector3.Up;
@@ -83,34 +92,6 @@ public partial class PlayerCharacter : CharacterBody3D
 		_cameraYawRoot.AddChild(_cameraPitchRoot);
 		_cameraPitchRoot.Position = new Vector3(0.0f, 1.55f, 0.0f);
 
-		_bodyMesh = new MeshInstance3D
-		{
-			Mesh = new CapsuleMesh
-			{
-				Radius = 0.35f,
-				Height = 1.1f
-			},
-			Position = new Vector3(0.0f, 0.9f, 0.0f)
-		};
-
-		_headMesh = new MeshInstance3D
-		{
-			Mesh = new SphereMesh { Radius = 0.18f, Height = 0.36f },
-			Position = new Vector3(0.0f, 0.0f, 0.0f)
-		};
-
-		StandardMaterial3D material = new()
-		{
-			AlbedoColor = tint,
-			Roughness = 0.6f,
-			Metallic = 0.0f
-		};
-
-		_bodyMesh.MaterialOverride = material;
-		_headMesh.MaterialOverride = material;
-		_visualYawRoot.AddChild(_bodyMesh);
-		_visualPitchRoot.AddChild(_headMesh);
-
 		const int OFF = 2;
 		_visualRoot.Set("physics_interpolation_mode", OFF);
 		_visualYawRoot.Set("physics_interpolation_mode", OFF);
@@ -118,27 +99,17 @@ public partial class PlayerCharacter : CharacterBody3D
 		_cameraYawRoot.Set("physics_interpolation_mode", OFF);
 		_cameraPitchRoot.Set("physics_interpolation_mode", OFF);
 
-			if (withCamera)
-			{
-			_camera = new Camera3D
-			{
-				Current = true,
-				Position = Vector3.Zero,
-				Near = 0.05f,
-				Far = 500.0f,
-				Fov = localCameraFov
-			};
-
-			_cameraPitchRoot.AddChild(_camera);
-			_bodyMesh.Visible = false;
-			_headMesh.Visible = false;
-
-			// Keep interpolation on for parent transforms (body/world motion), but disable it on the
-			// camera node itself because we apply local view/correction offsets each render frame.
-			_camera.Set("physics_interpolation_mode", OFF);
+		if (withCamera)
+		{
+			EnsureFirstPersonViewRig();
 		}
 
 		_initialized = true;
+	}
+
+	public override void _Ready()
+	{
+		EnsureThirdPersonModel();
 	}
 
 	public override void _Process(double delta)
@@ -349,5 +320,97 @@ public partial class PlayerCharacter : CharacterBody3D
 		}
 
 		return output;
+	}
+
+	private void EnsureThirdPersonModel()
+	{
+		if (_thirdPersonModelRoot is not null || !Visible)
+		{
+			return;
+		}
+
+		PackedScene? modelScene = ResourceLoader.Load<PackedScene>(ThirdPersonModelScenePath);
+		if (modelScene is null)
+		{
+			GD.PushWarning($"Failed to load third-person model scene: {ThirdPersonModelScenePath}");
+			return;
+		}
+
+		Node? instance = modelScene.Instantiate();
+		if (instance is not Node3D modelRoot)
+		{
+			GD.PushWarning($"Third-person model root must be Node3D: {ThirdPersonModelScenePath}");
+			instance.QueueFree();
+			return;
+		}
+
+		ApplyTintRecursive(modelRoot, _tint);
+		modelRoot.Visible = !_withCamera;
+		_visualYawRoot.AddChild(modelRoot);
+		_thirdPersonModelRoot = modelRoot;
+	}
+
+	private void EnsureFirstPersonViewRig()
+	{
+		if (_firstPersonViewRigRoot is not null || !_withCamera)
+		{
+			return;
+		}
+
+		PackedScene? viewRigScene = ResourceLoader.Load<PackedScene>(FirstPersonViewRigScenePath);
+		if (viewRigScene is null)
+		{
+			GD.PushWarning($"Failed to load first-person view rig scene: {FirstPersonViewRigScenePath}");
+			return;
+		}
+
+		Node? instance = viewRigScene.Instantiate();
+		if (instance is not Node3D viewRigRoot)
+		{
+			GD.PushWarning($"First-person view rig root must be Node3D: {FirstPersonViewRigScenePath}");
+			instance.QueueFree();
+			return;
+		}
+
+		_cameraPitchRoot.AddChild(viewRigRoot);
+		_firstPersonViewRigRoot = viewRigRoot;
+
+		Node3D? effects = viewRigRoot.GetNodeOrNull<Node3D>("Effects");
+		effects?.Set("physics_interpolation_mode", 2);
+		effects?.GetNodeOrNull<Node3D>("ArmsRoot")?.Set("physics_interpolation_mode", 2);
+
+		Camera3D? camera = viewRigRoot.GetNodeOrNull<Camera3D>("Effects/Camera3D");
+		if (camera is null)
+		{
+			GD.PushWarning($"First-person view rig is missing Effects/Camera3D: {FirstPersonViewRigScenePath}");
+			return;
+		}
+
+		camera.Current = true;
+		camera.Fov = _localCameraFov;
+		_camera = camera;
+		if (_thirdPersonModelRoot is not null)
+		{
+			_thirdPersonModelRoot.Visible = false;
+		}
+	}
+
+	private static void ApplyTintRecursive(Node node, Color tint)
+	{
+		if (node is GeometryInstance3D geometry)
+		{
+			StandardMaterial3D tintMaterial = new()
+			{
+				AlbedoColor = tint,
+				Roughness = 0.6f,
+				Metallic = 0.0f
+			};
+			geometry.MaterialOverride = tintMaterial;
+		}
+
+		foreach (Node child in node.GetChildren())
+		{
+			ApplyTintRecursive(child, tint);
+		}
 	}
 }
