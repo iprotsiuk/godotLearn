@@ -240,6 +240,17 @@ public partial class PlayerCharacter : CharacterBody3D
 		}
 	}
 
+	public void ResetInterpolationAfterSnap()
+	{
+		ResetPhysicsInterpolation();
+		_visualRoot.ResetPhysicsInterpolation();
+		_visualYawRoot.ResetPhysicsInterpolation();
+		_visualPitchRoot.ResetPhysicsInterpolation();
+		_cameraYawRoot.ResetPhysicsInterpolation();
+		_cameraPitchRoot.ResetPhysicsInterpolation();
+		_camera?.ResetPhysicsInterpolation();
+	}
+
 	public void OnJump()
 	{
 		_jumpLocked = true;

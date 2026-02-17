@@ -16,7 +16,11 @@ SIM_JITTER="${SIM_JITTER_MS:-0}"
 SIM_LOSS="${SIM_LOSS_PERCENT:-0}"
 SIM_SEED="${SIM_SEED:-1337}"
 
-"${GODOT_BIN}" --path "${ROOT_DIR}" -- \
+"${GODOT_BIN}" \
+  --headless \
+  --disable-render-loop \
+  --disable-vsync \
+  --path "${ROOT_DIR}" -- \
   --role=host \
   --port="${PORT}" \
   --window-pos=40,40 \
