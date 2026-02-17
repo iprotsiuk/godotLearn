@@ -12,8 +12,8 @@ public partial class NetSession
     private const float SessionJitterEwmaAlpha = 0.1f;
     private const float MaxInterpHoldOrExtrapMs = 100.0f;
     private const float InterpGapJumpMeters = 2.5f;
-    private const float ReconcileDeadzoneXZMeters = 0.01f;
-    private const float ReconcileDeadzoneYMeters = 0.01f;
+    private const float ReconcileDeadzoneXZMeters = 0.015f;
+    private const float ReconcileDeadzoneYMeters = 0.010f;
     private double _nextSnapshotRecvDiagAtSec;
     private double _reconcileAppliedWindowStartSec;
     private int _reconcileAppliedCountWindow;
@@ -452,7 +452,7 @@ public partial class NetSession
         }
         else if (Mathf.Abs(viewOffset.Y) > 0.000001f)
         {
-            int viewSmoothMs = Mathf.Min(40, _config.ReconciliationSmoothMs);
+            int viewSmoothMs = _config.ReconciliationSmoothMs;
             _localCharacter.AddViewCorrection(viewOffset, viewSmoothMs);
             _lastAppliedViewOffsetAbs = Mathf.Abs(viewOffset.Y);
             correctionsAppliedThisSample++;
