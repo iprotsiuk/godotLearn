@@ -7,17 +7,25 @@ namespace NetRunnerSlice.Player;
 
 public partial class PlayerCharacter : CharacterBody3D
 {
+	private const string PlayerCharacterSceneName = "PlayerCharacter.tscn";
 	private const string FirstPersonViewRigScenePath = "res://Scenes/Player/FirstPersonViewRig.tscn";
 	private const string ThirdPersonModelScenePath = "res://Scenes/Player/ThirdPersonModel.tscn";
 	private const float MinSmoothSec = 0.01f;
 	private const float MaxQueuedCorrection = 2.0f;
 	private const float MaxCorrectionSpeed = 100.0f;
 
-	private readonly Node3D _visualRoot = new();
-	private readonly Node3D _visualYawRoot = new();
-	private readonly Node3D _visualPitchRoot = new();
-	private readonly Node3D _cameraYawRoot = new();
-	private readonly Node3D _cameraPitchRoot = new();
+	[Export] public NodePath VisualRootPath { get; set; } = new("VisualRoot");
+	[Export] public NodePath VisualYawRootPath { get; set; } = new("VisualRoot/VisualYawRoot");
+	[Export] public NodePath VisualPitchRootPath { get; set; } = new("VisualRoot/VisualYawRoot/VisualPitchRoot");
+	[Export] public NodePath CameraYawRootPath { get; set; } = new("CameraYawRoot");
+	[Export] public NodePath CameraPitchRootPath { get; set; } = new("CameraYawRoot/CameraPitchRoot");
+	[Export] public NodePath CollisionPath { get; set; } = new("Collision");
+
+	private Node3D _visualRoot = null!;
+	private Node3D _visualYawRoot = null!;
+	private Node3D _visualPitchRoot = null!;
+	private Node3D _cameraYawRoot = null!;
+	private Node3D _cameraPitchRoot = null!;
 
 	private Node3D? _firstPersonViewRigRoot;
 	private Node3D? _thirdPersonModelRoot;
@@ -39,6 +47,7 @@ public partial class PlayerCharacter : CharacterBody3D
 	private LocomotionState _locomotionState = LocomotionState.CreateInitial(grounded: true);
 
 	private bool _initialized;
+	private bool _bound;
 
 	public int PeerId { get; private set; }
 
@@ -58,6 +67,8 @@ public partial class PlayerCharacter : CharacterBody3D
 
 	public void Setup(int peerId, bool withCamera, Color tint, float localCameraFov = 90.0f)
 	{
+		EnsureBound();
+
 		if (_initialized)
 		{
 			return;
@@ -72,25 +83,6 @@ public partial class PlayerCharacter : CharacterBody3D
 		UpDirection = Vector3.Up;
 		FloorStopOnSlope = true;
 		FloorSnapLength = 0.0f;
-
-		CollisionShape3D collision = new();
-		CapsuleShape3D capsule = new()
-		{
-			Radius = 0.35f,
-			Height = 1.1f
-		};
-		collision.Shape = capsule;
-		collision.Position = new Vector3(0.0f, 0.9f, 0.0f);
-		AddChild(collision);
-
-		AddChild(_visualRoot);
-		_visualRoot.AddChild(_visualYawRoot);
-		_visualYawRoot.AddChild(_visualPitchRoot);
-		_visualPitchRoot.Position = new Vector3(0.0f, 1.55f, 0.0f);
-
-		AddChild(_cameraYawRoot);
-		_cameraYawRoot.AddChild(_cameraPitchRoot);
-		_cameraPitchRoot.Position = new Vector3(0.0f, 1.55f, 0.0f);
 
 		const int OFF = 2;
 		_visualRoot.Set("physics_interpolation_mode", OFF);
@@ -114,6 +106,8 @@ public partial class PlayerCharacter : CharacterBody3D
 
 	public override void _Process(double delta)
 	{
+		EnsureBound();
+
 		float dt = Mathf.Max(0.0f, (float)delta);
 
 		if (_renderOffset.LengthSquared() <= 0.000001f && _renderVelocity.LengthSquared() <= 0.000001f)
@@ -163,6 +157,8 @@ public partial class PlayerCharacter : CharacterBody3D
 
 	public void SetLook(float yaw, float pitch)
 	{
+		EnsureBound();
+
 		Yaw = yaw;
 		Pitch = pitch;
 		_visualYawRoot.Rotation = new Vector3(0.0f, yaw, 0.0f);
@@ -412,5 +408,34 @@ public partial class PlayerCharacter : CharacterBody3D
 		{
 			ApplyTintRecursive(child, tint);
 		}
+	}
+
+	private T RequireNode<T>(NodePath path, string pathName) where T : Node
+	{
+		T? node = GetNodeOrNull<T>(path);
+		if (node is not null)
+		{
+			return node;
+		}
+
+		string message = $"PlayerCharacter is missing required node at path '{path}' for {pathName} (expected type {typeof(T).Name}) in scene {PlayerCharacterSceneName}.";
+		GD.PushError(message);
+		throw new System.InvalidOperationException(message);
+	}
+
+	private void EnsureBound()
+	{
+		if (_bound)
+		{
+			return;
+		}
+
+		RequireNode<CollisionShape3D>(CollisionPath, nameof(CollisionPath));
+		_visualRoot = RequireNode<Node3D>(VisualRootPath, nameof(VisualRootPath));
+		_visualYawRoot = RequireNode<Node3D>(VisualYawRootPath, nameof(VisualYawRootPath));
+		_visualPitchRoot = RequireNode<Node3D>(VisualPitchRootPath, nameof(VisualPitchRootPath));
+		_cameraYawRoot = RequireNode<Node3D>(CameraYawRootPath, nameof(CameraYawRootPath));
+		_cameraPitchRoot = RequireNode<Node3D>(CameraPitchRootPath, nameof(CameraPitchRootPath));
+		_bound = true;
 	}
 }

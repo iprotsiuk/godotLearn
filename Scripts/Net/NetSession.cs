@@ -7,6 +7,7 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession : Node
 {
+    private const string PlayerCharacterScenePath = "res://Scenes/Player/PlayerCharacter.tscn";
     private const int RewindHistoryTicks = 120;
     private const double ServerDiagnosticsLogIntervalSec = 2.0;
     private const double JoinDiagnosticsLogIntervalSec = 0.25;
@@ -90,6 +91,7 @@ public partial class NetSession : Node
     private readonly PlayerStateSnapshot[] _snapshotSendScratch = new PlayerStateSnapshot[NetConstants.MaxPlayers];
     private RunMode _mode;
     private NetworkConfig _config = new();
+    private PackedScene? _playerCharacterScene;
     private Node3D? _playerRoot;
     private bool _welcomeReceived;
     private bool _hasSpawnOrigin;
@@ -197,6 +199,7 @@ public partial class NetSession : Node
     {
         _config = config;
         _playerRoot = playerRoot;
+        _playerCharacterScene = GD.Load<PackedScene>(PlayerCharacterScenePath);
         _snapshotEveryTicks = Mathf.Max(1, _config.ServerTickRate / Mathf.Max(1, _config.SnapshotRate));
         _simLatency = _config.SimulatedLatencyMs;
         _simJitter = _config.SimulatedJitterMs;

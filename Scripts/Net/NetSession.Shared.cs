@@ -141,10 +141,9 @@ public partial class NetSession
             throw new System.InvalidOperationException("NetSession.Initialize must be called before Start.");
         }
 
-        PlayerCharacter character = new()
-        {
-            Name = $"Player_{peerId}"
-        };
+        PackedScene scene = _playerCharacterScene ?? GD.Load<PackedScene>(PlayerCharacterScenePath);
+        PlayerCharacter character = scene.Instantiate<PlayerCharacter>();
+        character.Name = $"Player_{peerId}";
 
         character.Setup(peerId, localCamera, TintForPeer(peerId, localCamera), _config.LocalFov);
         character.Visible = visible;
