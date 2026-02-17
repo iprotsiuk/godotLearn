@@ -195,6 +195,11 @@ public partial class NetSession
 			return;
 		}
 
+		if (visual.ShooterPeerId == _localPeerId && _localCharacter is not null)
+		{
+			return;
+		}
+
 		Vector3 direction = YawPitchToDirection(visual.Yaw, visual.Pitch);
 		if (direction.LengthSquared() <= 0.000001f)
 		{
@@ -564,6 +569,31 @@ public partial class NetSession
 			Velocity = (direction * VisualProjectileSpeed) + shooterVelocity,
 			ExpireAtSec = nowSec + VisualProjectileLifetimeSec
 		});
+	}
+
+	private void TrySpawnPredictedLocalFireVisual()
+	{
+		if (!IsClient || _localCharacter is null)
+		{
+			return;
+		}
+
+		Camera3D? camera = _localCharacter.LocalCamera;
+		if (camera is null || !GodotObject.IsInstanceValid(camera))
+		{
+			return;
+		}
+
+		Transform3D cameraTransform = camera.GlobalTransform;
+		Vector3 origin = cameraTransform.Origin;
+		Vector3 direction = -cameraTransform.Basis.Z;
+		if (direction.LengthSquared() <= 0.000001f)
+		{
+			return;
+		}
+
+		direction = direction.Normalized();
+		SpawnRemoteProjectile(origin, origin + (direction * WeaponMaxRange));
 	}
 
 	private void SpawnRemoteProjectile(Vector3 origin, Vector3 hitPoint)

@@ -54,6 +54,7 @@ public partial class NetSession
     private void TryLatchFirePressed()
     {
         _firePressRepeatTicksRemaining = Mathf.Clamp(1, 1, NetConstants.MaxInputRedundancy);
+        TrySpawnPredictedLocalFireVisual();
     }
 
     private void OnFocusOut()
