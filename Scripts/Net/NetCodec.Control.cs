@@ -1,4 +1,6 @@
 // Scripts/Net/NetCodec.Control.cs
+using Godot;
+
 namespace NetRunnerSlice.Net;
 
 public static partial class NetCodec
@@ -30,7 +32,12 @@ public static partial class NetCodec
         float gravity,
         int serverInputDelayTicks,
         float floorSnapLength,
-        float groundStickVelocity)
+        float groundStickVelocity,
+        int wallRunMaxTicks,
+        int slideMaxTicks,
+        float wallRunGravityScale,
+        float wallJumpUpVelocity,
+        float wallJumpAwayVelocity)
     {
         packet[0] = (byte)PacketType.Control;
         packet[1] = (byte)ControlType.Welcome;
@@ -54,6 +61,11 @@ public static partial class NetCodec
         WriteFloat(packet, 70, floorSnapLength);
         WriteFloat(packet, 74, groundStickVelocity);
         WriteUInt(packet, 78, serverTick);
+        packet[82] = (byte)Mathf.Clamp(wallRunMaxTicks, 0, 255);
+        packet[83] = (byte)Mathf.Clamp(slideMaxTicks, 0, 255);
+        WriteFloat(packet, 84, wallRunGravityScale);
+        WriteFloat(packet, 88, wallJumpUpVelocity);
+        WriteFloat(packet, 92, wallJumpAwayVelocity);
     }
 
     public static void WriteControlPing(byte[] packet, ushort pingSeq, uint clientTimeMs)
@@ -138,6 +150,16 @@ public static partial class NetCodec
     public static float ReadControlGroundStickVelocity(ReadOnlySpan<byte> packet) => ReadFloat(packet, 74);
 
     public static uint ReadControlWelcomeServerTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 78);
+
+    public static int ReadControlWallRunMaxTicks(ReadOnlySpan<byte> packet) => packet[82];
+
+    public static int ReadControlSlideMaxTicks(ReadOnlySpan<byte> packet) => packet[83];
+
+    public static float ReadControlWallRunGravityScale(ReadOnlySpan<byte> packet) => ReadFloat(packet, 84);
+
+    public static float ReadControlWallJumpUpVelocity(ReadOnlySpan<byte> packet) => ReadFloat(packet, 88);
+
+    public static float ReadControlWallJumpAwayVelocity(ReadOnlySpan<byte> packet) => ReadFloat(packet, 92);
 
     public static ushort ReadControlPingSeq(ReadOnlySpan<byte> packet) => ReadUShort(packet, 2);
 

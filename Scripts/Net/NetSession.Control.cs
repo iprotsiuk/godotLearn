@@ -54,7 +54,12 @@ public partial class NetSession
                         _config.Gravity,
                         serverPlayer.EffectiveInputDelayTicks,
                         _config.FloorSnapLength,
-                        _config.GroundStickVelocity);
+                        _config.GroundStickVelocity,
+                        _config.WallRunMaxTicks,
+                        _config.SlideMaxTicks,
+                        _config.WallRunGravityScale,
+                        _config.WallJumpUpVelocity,
+                        _config.WallJumpAwayVelocity);
                     SendPacket(fromPeer, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
                     GD.Print($"NetSession: Welcome sent to peer {fromPeer}");
                     break;
@@ -110,6 +115,11 @@ public partial class NetSession
                 _config.FloorSnapLength = Mathf.Clamp(NetCodec.ReadControlFloorSnapLength(packet), 0.0f, 2.0f);
                 _config.GroundStickVelocity = Mathf.Min(NetCodec.ReadControlGroundStickVelocity(packet), -0.01f);
                 _server_sim_tick = NetCodec.ReadControlWelcomeServerTick(packet);
+                _config.WallRunMaxTicks = Mathf.Clamp(NetCodec.ReadControlWallRunMaxTicks(packet), 0, 255);
+                _config.SlideMaxTicks = Mathf.Clamp(NetCodec.ReadControlSlideMaxTicks(packet), 0, 255);
+                _config.WallRunGravityScale = Mathf.Max(0.0f, NetCodec.ReadControlWallRunGravityScale(packet));
+                _config.WallJumpUpVelocity = Mathf.Max(0.0f, NetCodec.ReadControlWallJumpUpVelocity(packet));
+                _config.WallJumpAwayVelocity = Mathf.Max(0.0f, NetCodec.ReadControlWallJumpAwayVelocity(packet));
                 _lastAuthoritativeServerTick = _server_sim_tick;
                 GD.Print(
                     $"Welcome applied: MoveSpeed={_config.MoveSpeed:0.###}, GroundAccel={_config.GroundAcceleration:0.###}, InputDelayTicks={_config.ServerInputDelayTicks}");

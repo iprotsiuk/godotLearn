@@ -22,6 +22,11 @@ public sealed class NetworkConfig
     public float Gravity { get; set; } = 24.0f;
     public float FloorSnapLength { get; set; } = 0.25f;
     public float GroundStickVelocity { get; set; } = -0.1f;
+    public int WallRunMaxTicks { get; set; } = 24;
+    public int SlideMaxTicks { get; set; } = 0;
+    public float WallRunGravityScale { get; set; } = 0.35f;
+    public float WallJumpUpVelocity { get; set; } = 8.75f;
+    public float WallJumpAwayVelocity { get; set; } = 6.0f;
 
     public float MouseSensitivity { get; set; } = 0.0023f;
     public bool InvertLookY { get; set; } = false;

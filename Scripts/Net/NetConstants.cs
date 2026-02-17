@@ -12,7 +12,7 @@ public static class NetChannels
 
 public static class NetConstants
 {
-    public const uint ProtocolVersion = 6;
+    public const uint ProtocolVersion = 7;
     public const int MaxPlayers = 16;
     public const int MaxInputRedundancy = 5;
 
