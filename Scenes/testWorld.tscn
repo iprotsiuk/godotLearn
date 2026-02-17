@@ -16,13 +16,16 @@ sky = SubResource("Sky_l54rq")
 albedo_texture = ExtResource("1_pmequ")
 uv1_triplanar = true
 uv1_world_triplanar = true
+texture_filter = 5
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_l54rq"]
 albedo_texture = ExtResource("3_d0hh2")
 uv1_triplanar = true
+texture_filter = 5
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_iey3s"]
 albedo_texture = ExtResource("3_d0hh2")
+texture_filter = 5
 
 [node name="TestWorld" type="Node3D" unique_id=1869141061]
 

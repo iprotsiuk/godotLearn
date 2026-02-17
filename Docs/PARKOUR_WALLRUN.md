@@ -9,13 +9,14 @@ This document defines deterministic wallrun/walljump behavior for prediction + r
 - Valid wall contact exists from slide collisions:
   - collision normal has `abs(y) < 0.2`,
   - XZ component is non-zero and normalized.
-- Move intent is active (`MoveAxes.LengthSquared() >= 0.01`).
+- Forward move intent is active (`MoveAxes.LengthSquared() >= 0.01` and `MoveAxes.Y > 0.01`).
 - Air reattach cooldown is not active (`WallRunTicksRemaining == 0` while in `Air`).
-- `NetworkConfig.WallRunMaxTicks > 0`.
+- `NetworkConfig.WallRunMaxTicks == 0` (unlimited) or `> 0` (timed).
 
 ## Maintain Conditions
 
 - While in `WallRun`, wall contact must remain valid.
+- While in `WallRun`, wall normal continuity must remain valid (`dot(previous, candidate) >= 0.5`); sharp corners detach to `Air`.
 - Adhesion:
   - outward normal velocity is removed (`v dot n > 0` gets canceled),
   - inward component is enforced toward target `-WallRunStickSpeed`.
@@ -32,7 +33,7 @@ This document defines deterministic wallrun/walljump behavior for prediction + r
 
 - Grounded after move => switch to `Grounded` and clear wallrun timers.
 - Wall contact lost => switch to `Air` (no reattach cooldown applied).
-- Wallrun timeout (`WallRunTicksRemaining <= 0`) => switch to `Air` and set reattach cooldown.
+- Wallrun timeout (`WallRunTicksRemaining <= 0`) => switch to `Air` and set reattach cooldown (only when `WallRunMaxTicks > 0`).
 - Jump press during `WallRun` => walljump in same tick, switch to `Air`, set reattach cooldown.
 
 ## Walljump Rules

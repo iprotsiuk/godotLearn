@@ -71,9 +71,26 @@ public partial class PlayerCameraEffects : Node3D
 			if (wallNormalXZ.LengthSquared() > 0.0001f)
 			{
 				wallNormalXZ = wallNormalXZ.Normalized();
-				Vector3 right = _ownerCharacter.GlobalTransform.Basis.X;
-				float side = Mathf.Sign(wallNormalXZ.Dot(right));
-				targetRollRad = Mathf.DegToRad(WallRunRollDegrees) * side;
+				Basis basis = _ownerCharacter.GlobalTransform.Basis;
+				Vector3 localWallNormal = basis.Inverse() * wallNormalXZ;
+				float baseTiltSide = Mathf.Sign(localWallNormal.X); // Away from wall for forward motion.
+				if (Mathf.Abs(baseTiltSide) > 0.0f)
+				{
+					Vector3 runDir = new Vector3(ownerVelocity.X, 0.0f, ownerVelocity.Z).Slide(wallNormalXZ);
+					float runFlip = 1.0f;
+					if (runDir.LengthSquared() > 0.0001f)
+					{
+						Vector3 forward = -basis.Z;
+						forward.Y = 0.0f;
+						if (forward.LengthSquared() > 0.0001f)
+						{
+							float alongLook = runDir.Normalized().Dot(forward.Normalized());
+							runFlip = alongLook < 0.0f ? -1.0f : 1.0f;
+						}
+					}
+
+					targetRollRad = Mathf.DegToRad(WallRunRollDegrees) * -(baseTiltSide * runFlip);
+				}
 			}
 		}
 

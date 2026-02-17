@@ -41,6 +41,8 @@ public static class PlayerLocomotion
 	private const float LedgeSupportProbeExtra = 0.05f;
 	private const float WallContactMaxAbsY = 0.2f;
 	private const float WallRunIntentMinMoveAxesSq = 0.01f;
+	private const float WallRunForwardIntentMin = 0.01f;
+	private const float WallRunMinContinueNormalDot = 0.5f;
 	private const float MinNormalLengthSq = 0.000001f;
 	private const float WallRunStickSpeed = 2.0f;
 	private const float WallProbeChestHeight = 1.05f;
@@ -106,6 +108,7 @@ public static class PlayerLocomotion
 			state.WallRunTicksRemaining = Mathf.Max(0, state.WallRunTicksRemaining - 1);
 		}
 
+		bool wallRunHasDurationLimit = config.WallRunMaxTicks > 0;
 		LocomotionMode nextMode;
 		if (groundedAfter)
 		{
@@ -121,14 +124,33 @@ public static class PlayerLocomotion
 		}
 		else if (activeMode == LocomotionMode.WallRun)
 		{
-			int remainingWallRunTicks = Mathf.Max(0, state.WallRunTicksRemaining - 1);
-			if (!hasWallContact)
+			int remainingWallRunTicks = state.WallRunTicksRemaining;
+			Vector3 previousWallNormal = new Vector3(state.WallNormal.X, 0.0f, state.WallNormal.Z);
+			bool canContinueOnCandidateWall = CanContinueWallRunOnCandidate(previousWallNormal, wallNormalCandidate);
+			if (wallRunHasDurationLimit)
+			{
+				remainingWallRunTicks = Mathf.Max(0, remainingWallRunTicks - 1);
+			}
+
+			if (!IsWallRunIntentActive(input))
 			{
 				nextMode = LocomotionMode.Air;
 				state.WallNormal = Vector3.Zero;
 				state.WallRunTicksRemaining = 0;
 			}
-			else if (remainingWallRunTicks <= 0)
+			else if (!hasWallContact)
+			{
+				nextMode = LocomotionMode.Air;
+				state.WallNormal = Vector3.Zero;
+				state.WallRunTicksRemaining = 0;
+			}
+			else if (!canContinueOnCandidateWall)
+			{
+				nextMode = LocomotionMode.Air;
+				state.WallNormal = Vector3.Zero;
+				state.WallRunTicksRemaining = 0;
+			}
+			else if (wallRunHasDurationLimit && remainingWallRunTicks <= 0)
 			{
 				nextMode = LocomotionMode.Air;
 				state.WallNormal = Vector3.Zero;
@@ -144,12 +166,13 @@ public static class PlayerLocomotion
 		else if (state.WallRunTicksRemaining <= 0 &&
 				 activeMode == LocomotionMode.Air &&
 				 hasWallContact &&
-				 config.WallRunMaxTicks > 0 &&
 				 IsWallRunIntentActive(input))
 		{
 			nextMode = LocomotionMode.WallRun;
 			state.WallNormal = wallNormalCandidate;
-			state.WallRunTicksRemaining = Mathf.Clamp(config.WallRunMaxTicks, 0, 255);
+			state.WallRunTicksRemaining = wallRunHasDurationLimit
+				? Mathf.Clamp(config.WallRunMaxTicks, 0, 255)
+				: 0;
 		}
 		else
 		{
@@ -357,7 +380,22 @@ public static class PlayerLocomotion
 
 	private static bool IsWallRunIntentActive(in InputCommand input)
 	{
-		return input.MoveAxes.LengthSquared() >= WallRunIntentMinMoveAxesSq;
+		return input.MoveAxes.LengthSquared() >= WallRunIntentMinMoveAxesSq &&
+			   input.MoveAxes.Y > WallRunForwardIntentMin;
+	}
+
+	private static bool CanContinueWallRunOnCandidate(in Vector3 previousWallNormal, in Vector3 candidateWallNormal)
+	{
+		Vector3 prev = new Vector3(previousWallNormal.X, 0.0f, previousWallNormal.Z);
+		Vector3 candidate = new Vector3(candidateWallNormal.X, 0.0f, candidateWallNormal.Z);
+		if (prev.LengthSquared() <= MinNormalLengthSq || candidate.LengthSquared() <= MinNormalLengthSq)
+		{
+			return true;
+		}
+
+		prev = prev.Normalized();
+		candidate = candidate.Normalized();
+		return prev.Dot(candidate) >= WallRunMinContinueNormalDot;
 	}
 
 	private static LocomotionMode ResolveActiveMode(LocomotionMode mode, bool wasGrounded)
@@ -445,6 +483,12 @@ public static class PlayerLocomotion
 		}
 
 		wallNormal = wallNormal.Normalized();
+		if (!IsWallRunIntentActive(input))
+		{
+			AirStep(input, config, ref velocity, wasGrounded: false);
+			return new WallRunStepResult(forceExitWallRun: true, didWallJump: false, cooldownTicks: 0);
+		}
+
 		if (jumpPressed)
 		{
 			Vector3 tangentVelocity = velocity.Slide(wallNormal);
