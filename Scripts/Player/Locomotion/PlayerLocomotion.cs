@@ -41,6 +41,7 @@ public static class PlayerLocomotion
 
 		bool jumpPressed = (input.Buttons & InputButtons.JumpPressed) != 0;
 		LocomotionMode activeMode = ResolveActiveMode(state.Mode, wasGrounded);
+		bool forceExitWallRun = false;
 
 		switch (activeMode)
 		{
@@ -51,7 +52,12 @@ public static class PlayerLocomotion
 				AirStep(input, config, ref velocity, wasGrounded);
 				break;
 			case LocomotionMode.WallRun:
-				WallRunStep(player, input, config, ref velocity, state, jumpPressed, wasGrounded);
+				forceExitWallRun = WallRunStep(player, input, config, ref velocity, state, jumpPressed, wasGrounded);
+				if (forceExitWallRun)
+				{
+					state.WallNormal = Vector3.Zero;
+					state.WallRunTicksRemaining = 0;
+				}
 				break;
 			case LocomotionMode.WallCling:
 				WallClingStep(input, config, ref velocity, wasGrounded);
@@ -81,13 +87,17 @@ public static class PlayerLocomotion
 			state.WallNormal = Vector3.Zero;
 			state.WallRunTicksRemaining = 0;
 		}
-		else if (state.Mode == LocomotionMode.WallRun && hasWallContact && state.WallRunTicksRemaining > 0)
+		else if (!forceExitWallRun &&
+				 state.Mode == LocomotionMode.WallRun &&
+				 hasWallContact &&
+				 state.WallRunTicksRemaining > 0)
 		{
 			nextMode = LocomotionMode.WallRun;
 			state.WallNormal = wallNormalCandidate;
 			state.WallRunTicksRemaining = Mathf.Max(0, state.WallRunTicksRemaining - 1);
 		}
-		else if (state.Mode == LocomotionMode.Air &&
+		else if (!forceExitWallRun &&
+				 state.Mode == LocomotionMode.Air &&
 				 hasWallContact &&
 				 config.WallRunMaxTicks > 0 &&
 				 IsWallRunIntentActive(input))
@@ -106,9 +116,7 @@ public static class PlayerLocomotion
 		player.SetLocomotionState(state);
 		player.PostSimUpdate();
 
-		// TODO(parkour): compute wall sensors here (raycasts/slide-collision normals) and store in state.
-		// TODO(parkour): when enabled, WallRun should modify gravity and constrain horizontal motion along wall tangent.
-		// TODO(parkour): on wall-jump input, inject exit impulse and transition to Air.
+		// TODO(parkour): compute dedicated wall sensors here (raycasts/probes) instead of relying on slide normals.
 		return new LocomotionStepResult(wasGrounded, groundedAfter, body.FloorSnapLength, state.Mode);
 	}
 
@@ -209,7 +217,7 @@ public static class PlayerLocomotion
 		}
 	}
 
-	private static void WallRunStep(
+	private static bool WallRunStep(
 		PlayerCharacter player,
 		in InputCommand input,
 		NetworkConfig config,
@@ -221,15 +229,28 @@ public static class PlayerLocomotion
 		if (!EnableWallRun)
 		{
 			AirStep(input, config, ref velocity, wasGrounded);
-			return;
+			return false;
 		}
 
-		// TODO(parkour): replace with actual wallrun dynamics and state transitions.
-		AirStep(input, config, ref velocity, wasGrounded);
+		Vector3 wallNormal = new(state.WallNormal.X, 0.0f, state.WallNormal.Z);
+		if (wallNormal.LengthSquared() <= 0.000001f)
+		{
+			AirStep(input, config, ref velocity, wasGrounded);
+			return true;
+		}
+
+		wallNormal = wallNormal.Normalized();
 		if (jumpPressed && player.CanJump)
 		{
-			_ = state.WallNormal;
+			velocity = (-wallNormal * config.WallJumpAwayVelocity) + (Vector3.Up * config.WallJumpUpVelocity);
+			player.OnJump();
+			return true;
 		}
+
+		float wallRunAccel = config.AirAcceleration * config.AirControlFactor;
+		ApplyHorizontalConstrainedToWall(input, config.MoveSpeed, wallRunAccel, wallNormal, ref velocity);
+		velocity.Y -= (config.Gravity * config.WallRunGravityScale) * input.DtFixed;
+		return false;
 	}
 
 	private static void WallClingStep(in InputCommand input, NetworkConfig config, ref Vector3 velocity, bool wasGrounded)
@@ -282,6 +303,28 @@ public static class PlayerLocomotion
 		Vector3 worldWish = new Basis(Vector3.Up, input.Yaw) * localWish;
 		Vector3 desiredHorizontal = worldWish * moveSpeed;
 		Vector3 horizontalVelocity = new(velocity.X, 0.0f, velocity.Z);
+		horizontalVelocity = horizontalVelocity.MoveToward(desiredHorizontal, acceleration * input.DtFixed);
+		velocity.X = horizontalVelocity.X;
+		velocity.Z = horizontalVelocity.Z;
+	}
+
+	private static void ApplyHorizontalConstrainedToWall(
+		in InputCommand input,
+		float moveSpeed,
+		float acceleration,
+		in Vector3 wallNormal,
+		ref Vector3 velocity)
+	{
+		Vector2 move = input.MoveAxes;
+		if (move.LengthSquared() > 1.0f)
+		{
+			move = move.Normalized();
+		}
+
+		Vector3 localWish = new(move.X, 0.0f, -move.Y);
+		Vector3 worldWish = new Basis(Vector3.Up, input.Yaw) * localWish;
+		Vector3 desiredHorizontal = worldWish.Slide(wallNormal) * moveSpeed;
+		Vector3 horizontalVelocity = new Vector3(velocity.X, 0.0f, velocity.Z).Slide(wallNormal);
 		horizontalVelocity = horizontalVelocity.MoveToward(desiredHorizontal, acceleration * input.DtFixed);
 		velocity.X = horizontalVelocity.X;
 		velocity.Z = horizontalVelocity.Z;
