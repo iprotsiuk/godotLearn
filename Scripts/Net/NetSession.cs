@@ -145,6 +145,9 @@ public partial class NetSession : Node
     private readonly Dictionary<ushort, double> _pingSent = new();
     private double _nextServerDiagnosticsLogAtSec;
     private bool _hasFocus = true;
+    private bool _focusOutPending;
+    private bool _focusOutResetApplied;
+    private double _focusOutStartedAtSec;
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
     private uint _lastAckedSeq;

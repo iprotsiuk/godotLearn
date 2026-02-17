@@ -7,6 +7,10 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private const double AheadOfHorizonDiagIntervalSec = 1.0;
+    private const double InputSendDiagIntervalSec = 1.0;
+    private const float SnapshotDiagGapWarnMs = 200.0f;
+    private const float SnapshotDiagAgeWarnMs = 200.0f;
     private const float GlobalInterpJitterScale = 1.0f;
     private const float GlobalInterpMaxExtraMs = 100.0f;
     private const float SessionJitterEwmaAlpha = 0.1f;
@@ -17,6 +21,8 @@ public partial class NetSession
     private const uint FutureDropBurstThreshold = 10;
     private const double FutureDropBurstWindowSec = 1.0;
     private double _nextSnapshotRecvDiagAtSec;
+    private double _nextAheadOfHorizonDiagAtSec;
+    private double _nextInputSendDiagAtSec;
     private double _reconcileAppliedWindowStartSec;
     private int _reconcileAppliedCountWindow;
     private float _lastAppliedRenderOffsetLen;
@@ -99,11 +105,12 @@ public partial class NetSession
             desired_horizon_tick = maxSafeSendTick;
         }
 
-        if (_client_send_tick > desired_horizon_tick)
+        if (_client_send_tick > desired_horizon_tick && nowSec >= _nextAheadOfHorizonDiagAtSec)
         {
             GD.Print(
                 $"AheadOfHorizon: sendTick={_client_send_tick} horizon={desired_horizon_tick} " +
                 $"est={_client_est_server_tick} lastAuth={_lastAuthoritativeServerTick}");
+            _nextAheadOfHorizonDiagAtSec = nowSec + AheadOfHorizonDiagIntervalSec;
         }
 
         int sentThisTick = SendInputsUpToDesiredHorizon(desired_horizon_tick, allowPrediction: _localCharacter is not null);
@@ -245,7 +252,12 @@ public partial class NetSession
 
         if (generatedCount > 1)
         {
-            GD.Print($"InputSendDiag: generated={generatedCount} packets={packetCount} seq_range={firstGeneratedSeq}..{lastGeneratedSeq}");
+            double nowSec = Time.GetTicksMsec() / 1000.0;
+            if (nowSec >= _nextInputSendDiagAtSec)
+            {
+                GD.Print($"InputSendDiag: generated={generatedCount} packets={packetCount} seq_range={firstGeneratedSeq}..{lastGeneratedSeq}");
+                _nextInputSendDiagAtSec = nowSec + InputSendDiagIntervalSec;
+            }
         }
 
         return generatedCount;
@@ -357,7 +369,8 @@ public partial class NetSession
         _lastAuthoritativeServerTick = serverTick;
 
         UpdateSessionSnapshotJitter(localNowSec);
-        if (localNowSec >= _nextSnapshotRecvDiagAtSec)
+        bool snapshotDiagWarn = recvGapMs >= SnapshotDiagGapWarnMs || lastSnapshotAgeMs >= SnapshotDiagAgeWarnMs;
+        if ((_logControlPackets || snapshotDiagWarn) && localNowSec >= _nextSnapshotRecvDiagAtSec)
         {
             _nextSnapshotRecvDiagAtSec = localNowSec + 1.0;
             GD.Print(
@@ -572,10 +585,13 @@ public partial class NetSession
             float appliedPerSec = windowSec > 0.000001
                 ? (float)(_reconcileAppliedCountWindow / windowSec)
                 : 0.0f;
-            GD.Print(
-                $"ReconcileApplyDiag: corrections_applied_per_sec={appliedPerSec:0.00} " +
-                $"last_applied_render_offset_len={_lastAppliedRenderOffsetLen:0.####} " +
-                $"last_applied_view_offset_abs={_lastAppliedViewOffsetAbs:0.####}");
+            if (_logControlPackets || appliedPerSec > 0.01f || _lastAppliedRenderOffsetLen > 0.0001f || _lastAppliedViewOffsetAbs > 0.0001f)
+            {
+                GD.Print(
+                    $"ReconcileApplyDiag: corrections_applied_per_sec={appliedPerSec:0.00} " +
+                    $"last_applied_render_offset_len={_lastAppliedRenderOffsetLen:0.####} " +
+                    $"last_applied_view_offset_abs={_lastAppliedViewOffsetAbs:0.####}");
+            }
             _reconcileAppliedWindowStartSec = nowSec;
             _reconcileAppliedCountWindow = 0;
         }

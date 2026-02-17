@@ -368,7 +368,8 @@ public partial class NetSession
         byte[] snapshotPayload = new byte[snapshotBytes];
         System.Array.Copy(_snapshotPacket, snapshotPayload, snapshotBytes);
 
-        if (nowSec >= _nextSnapshotSendDiagAtSec)
+        bool snapshotSendWarn = stateCount == 0;
+        if ((_logControlPackets || snapshotSendWarn) && nowSec >= _nextSnapshotSendDiagAtSec)
         {
             _nextSnapshotSendDiagAtSec = nowSec + 1.0;
             GD.Print($"SnapshotSendDiag: tick={_server_sim_tick} count={stateCount} bytes={snapshotBytes}");

@@ -6,6 +6,8 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private const double FocusOutResetGraceSec = 0.35;
+
     private const int FirePressDiagCapacity = 128;
 
     private struct FirePressDiagSample
@@ -46,6 +48,7 @@ public partial class NetSession
 
     private void CaptureInputState()
     {
+        ProcessDeferredFocusOutReset();
         if (!_hasFocus)
         {
             _inputState.MoveAxes = Vector2.Zero;
@@ -89,21 +92,52 @@ public partial class NetSession
     {
         LogFocusDiag("out");
         _hasFocus = false;
+        _focusOutPending = true;
+        _focusOutResetApplied = false;
+        _focusOutStartedAtSec = Time.GetTicksMsec() / 1000.0;
         _inputState = default;
-        AdvanceInputEpoch(resetTickToServerEstimate: false);
-        ReleaseGameplayActions();
-        Input.FlushBufferedEvents();
-        Input.MouseMode = Input.MouseModeEnum.Visible;
     }
 
     private void OnFocusIn()
     {
         LogFocusDiag("in");
         _hasFocus = true;
+        double nowSec = Time.GetTicksMsec() / 1000.0;
+        bool transientFocusBlip = _focusOutPending &&
+            !_focusOutResetApplied &&
+            (nowSec - _focusOutStartedAtSec) < FocusOutResetGraceSec;
+        _focusOutPending = false;
         _inputState = default;
+
+        if (transientFocusBlip)
+        {
+            Input.FlushBufferedEvents();
+            return;
+        }
+
         AdvanceInputEpoch(resetTickToServerEstimate: true);
         ReleaseGameplayActions();
         Input.FlushBufferedEvents();
+    }
+
+    private void ProcessDeferredFocusOutReset()
+    {
+        if (!_focusOutPending || _focusOutResetApplied || _hasFocus)
+        {
+            return;
+        }
+
+        double nowSec = Time.GetTicksMsec() / 1000.0;
+        if ((nowSec - _focusOutStartedAtSec) < FocusOutResetGraceSec)
+        {
+            return;
+        }
+
+        _focusOutResetApplied = true;
+        AdvanceInputEpoch(resetTickToServerEstimate: false);
+        ReleaseGameplayActions();
+        Input.FlushBufferedEvents();
+        Input.MouseMode = Input.MouseModeEnum.Visible;
     }
 
     private void AdvanceInputEpoch(bool resetTickToServerEstimate)
