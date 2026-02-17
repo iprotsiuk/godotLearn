@@ -7,6 +7,8 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private double _nextSnapshotSendDiagAtSec;
+
     private static void RecordUsageWindow(ServerPlayer player, byte mode)
     {
         if (player.UsageWindowCount == player.UsageWindow.Length)
@@ -192,6 +194,8 @@ public partial class NetSession
     private void ResetPeerForEpoch(int peerId, ServerPlayer player, uint epoch)
     {
         player.Inputs.Clear();
+        player.PendingPings.Clear();
+        _serverRttOutlierStreak[peerId] = 0;
         player.CurrentInputEpoch = epoch == 0 ? 1u : epoch;
         player.MissingInputTicks = 0;
         player.PendingSafetyNeutralTicks = 1;
@@ -360,13 +364,21 @@ public partial class NetSession
         }
 
         int stateCount = BuildSnapshotStates();
-        NetCodec.WriteSnapshot(_snapshotPacket, _server_sim_tick, _snapshotSendScratch.AsSpan(0, stateCount));
+        int snapshotBytes = NetCodec.WriteSnapshot(_snapshotPacket, _server_sim_tick, _snapshotSendScratch.AsSpan(0, stateCount));
+        byte[] snapshotPayload = new byte[snapshotBytes];
+        System.Array.Copy(_snapshotPacket, snapshotPayload, snapshotBytes);
+
+        if (nowSec >= _nextSnapshotSendDiagAtSec)
+        {
+            _nextSnapshotSendDiagAtSec = nowSec + 1.0;
+            GD.Print($"SnapshotSendDiag: tick={_server_sim_tick} count={stateCount} bytes={snapshotBytes}");
+        }
 
         foreach (int targetPeer in _serverPlayers.Keys)
         {
             if (_mode == RunMode.ListenServer && targetPeer == _localPeerId)
             {
-                HandleSnapshot(_snapshotPacket);
+                HandleSnapshot(snapshotPayload);
                 continue;
             }
 
@@ -374,7 +386,7 @@ public partial class NetSession
                 targetPeer,
                 NetChannels.Snapshot,
                 MultiplayerPeer.TransferModeEnum.UnreliableOrdered,
-                _snapshotPacket);
+                snapshotPayload);
         }
     }
 

@@ -42,7 +42,7 @@ public static partial class NetCodec
         return true;
     }
 
-    public static void WriteSnapshot(byte[] packet, uint serverTick, ReadOnlySpan<PlayerStateSnapshot> states)
+    public static int WriteSnapshot(byte[] packet, uint serverTick, ReadOnlySpan<PlayerStateSnapshot> states)
     {
         packet[0] = (byte)PacketType.Snapshot;
         WriteUInt(packet, 1, serverTick);
@@ -51,11 +51,14 @@ public static partial class NetCodec
         packet[5] = (byte)count;
 
         int offset = 6;
-        for (int i = 0; i < NetConstants.MaxPlayers; i++)
+        // PMTU robustness: write only active player states so WAN links are less likely to fragment/drop snapshots.
+        for (int i = 0; i < count; i++)
         {
-            PlayerStateSnapshot state = i < count ? states[i] : default;
+            PlayerStateSnapshot state = states[i];
             WriteState(packet, ref offset, in state);
         }
+
+        return offset;
     }
 
     public static bool TryReadSnapshot(
@@ -66,13 +69,25 @@ public static partial class NetCodec
     {
         serverTick = 0;
         count = 0;
-        if (packet.Length < NetConstants.SnapshotPacketBytes || packet[0] != (byte)PacketType.Snapshot)
+        if (packet.Length < 6 || packet[0] != (byte)PacketType.Snapshot)
         {
             return false;
         }
 
         serverTick = ReadUInt(packet, 1);
-        count = Mathf.Min(packet[5], NetConstants.MaxPlayers);
+        int rawCount = packet[5];
+        if (rawCount > NetConstants.MaxPlayers)
+        {
+            return false;
+        }
+
+        int requiredLength = 6 + (rawCount * NetConstants.SnapshotStateBytes);
+        if (packet.Length < requiredLength)
+        {
+            return false;
+        }
+
+        count = rawCount;
         int offset = 6;
         for (int i = 0; i < count; i++)
         {

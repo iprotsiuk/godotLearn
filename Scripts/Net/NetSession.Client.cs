@@ -12,8 +12,13 @@ public partial class NetSession
     private const float SessionJitterEwmaAlpha = 0.1f;
     private const float MaxInterpHoldOrExtrapMs = 100.0f;
     private const float InterpGapJumpMeters = 2.5f;
-    private const float ReconcileDeadzoneXZMeters = 0.003f;
-    private const float ReconcileDeadzoneYMeters = 0.003f;
+    private const float ReconcileDeadzoneXZMeters = 0.01f;
+    private const float ReconcileDeadzoneYMeters = 0.01f;
+    private double _nextSnapshotRecvDiagAtSec;
+    private double _reconcileAppliedWindowStartSec;
+    private int _reconcileAppliedCountWindow;
+    private float _lastAppliedRenderOffsetLen;
+    private float _lastAppliedViewOffsetAbs;
 
     private void ClientConnectedToServer()
     {
@@ -286,12 +291,24 @@ public partial class NetSession
 
         long localNowUsec = GetLocalUsec();
         double localNowSec = localNowUsec / 1_000_000.0;
+        float recvGapMs = _hasSnapshotArrivalTimeSec
+            ? (float)((localNowSec - _lastSnapshotArrivalTimeSec) * 1000.0)
+            : -1.0f;
+        float lastSnapshotAgeMs = _lastAuthoritativeSnapshotAtSec > 0.0
+            ? (float)((localNowSec - _lastAuthoritativeSnapshotAtSec) * 1000.0)
+            : -1.0f;
         _lastAuthoritativeSnapshotAtSec = localNowSec;
         ObserveAuthoritativeServerTick(serverTick, localNowUsec);
         _server_sim_tick = serverTick;
         _lastAuthoritativeServerTick = serverTick;
 
         UpdateSessionSnapshotJitter(localNowSec);
+        if (localNowSec >= _nextSnapshotRecvDiagAtSec)
+        {
+            _nextSnapshotRecvDiagAtSec = localNowSec + 1.0;
+            GD.Print(
+                $"SnapshotRecvDiag: tick={serverTick} count={count} bytes={packet.Length} recv_gap_ms={recvGapMs:0.0} last_age_ms={lastSnapshotAgeMs:0.0}");
+        }
 
         uint snapshotServerTick = serverTick;
         for (int i = 0; i < count; i++)
@@ -406,33 +423,70 @@ public partial class NetSession
             _correctionRateWindowCount++;
         }
 
-        Vector3 renderOffset = new(rawDelta.X, 0.0f, rawDelta.Z);
+        // Deadzone must affect visual correction offsets, not only metrics, otherwise tiny noise still jitters camera/mesh.
+        Vector3 renderOffset = new(metricDelta.X, 0.0f, metricDelta.Z);
+        int correctionsAppliedThisSample = 0;
         bool hardSnapXZ = rawCorrXZ > _config.ReconciliationSnapThreshold;
         if (hardSnapXZ)
         {
             _localCharacter.ClearRenderCorrection();
             _localCharacter.ClearViewCorrection();
+            _lastAppliedRenderOffsetLen = 0.0f;
+        }
+        else if (renderOffset.LengthSquared() > 0.000001f)
+        {
+            _localCharacter.AddRenderCorrection(renderOffset, _config.ReconciliationSmoothMs);
+            _lastAppliedRenderOffsetLen = renderOffset.Length();
+            correctionsAppliedThisSample++;
         }
         else
         {
-            _localCharacter.AddRenderCorrection(renderOffset, _config.ReconciliationSmoothMs);
+            _lastAppliedRenderOffsetLen = 0.0f;
         }
 
-        Vector3 viewOffset = new(0.0f, rawDelta.Y, 0.0f);
+        Vector3 viewOffset = new(0.0f, metricDelta.Y, 0.0f);
         if (hardSnapXZ || rawCorrY > 0.5f)
         {
             _localCharacter.ClearViewCorrection();
+            _lastAppliedViewOffsetAbs = 0.0f;
         }
-        else
+        else if (Mathf.Abs(viewOffset.Y) > 0.000001f)
         {
             int viewSmoothMs = Mathf.Min(40, _config.ReconciliationSmoothMs);
             _localCharacter.AddViewCorrection(viewOffset, viewSmoothMs);
+            _lastAppliedViewOffsetAbs = Mathf.Abs(viewOffset.Y);
+            correctionsAppliedThisSample++;
             if (_logControlPackets && rawCorrY > 0.0005f)
             {
                 GD.Print(
                     $"ReconcileViewDiag: serverTick={_lastAuthoritativeServerTick} ack={_lastAckedSeq} " +
                     $"rawDeltaY={rawDelta.Y:0.####} rawCorrY={rawCorrY:0.####} smoothMs={viewSmoothMs}");
             }
+        }
+        else
+        {
+            _lastAppliedViewOffsetAbs = 0.0f;
+        }
+
+        double nowSec = Time.GetTicksMsec() / 1000.0;
+        if (_reconcileAppliedWindowStartSec <= 0.0)
+        {
+            _reconcileAppliedWindowStartSec = nowSec;
+        }
+
+        _reconcileAppliedCountWindow += correctionsAppliedThisSample;
+        if ((nowSec - _reconcileAppliedWindowStartSec) >= 1.0)
+        {
+            double windowSec = nowSec - _reconcileAppliedWindowStartSec;
+            float appliedPerSec = windowSec > 0.000001
+                ? (float)(_reconcileAppliedCountWindow / windowSec)
+                : 0.0f;
+            GD.Print(
+                $"ReconcileApplyDiag: corrections_applied_per_sec={appliedPerSec:0.00} " +
+                $"last_applied_render_offset_len={_lastAppliedRenderOffsetLen:0.####} " +
+                $"last_applied_view_offset_abs={_lastAppliedViewOffsetAbs:0.####}");
+            _reconcileAppliedWindowStartSec = nowSec;
+            _reconcileAppliedCountWindow = 0;
         }
     }
 

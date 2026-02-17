@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Godot;
 using NetRunnerSlice.Player.Locomotion;
 
@@ -5,12 +6,28 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private const int FirePressDiagCapacity = 128;
+
+    private struct FirePressDiagSample
+    {
+        public long LocalUsec;
+        public int AppliedDelayTicks;
+        public int TargetDelayTicks;
+        public float RttMs;
+        public float JitterMs;
+        public uint ClientEstServerTick;
+        public uint ClientSendTick;
+        public int HorizonGap;
+    }
+
     private struct InputState
     {
         public Vector2 MoveAxes;
         public bool JumpHeld;
     }
 
+    private readonly Dictionary<uint, FirePressDiagSample> _firePressDiagByTick = new();
+    private readonly Queue<uint> _firePressDiagOrder = new();
     private InputState _inputState;
     private int _jumpPressRepeatTicksRemaining;
     private int _firePressRepeatTicksRemaining;
@@ -64,11 +81,13 @@ public partial class NetSession
     private void TryLatchFirePressed()
     {
         _firePressRepeatTicksRemaining = Mathf.Clamp(1, 1, NetConstants.MaxInputRedundancy);
+        RecordLocalFirePressDiag(_client_send_tick);
         TrySpawnPredictedLocalFireVisual();
     }
 
     private void OnFocusOut()
     {
+        LogFocusDiag("out");
         _hasFocus = false;
         _inputState = default;
         AdvanceInputEpoch(resetTickToServerEstimate: false);
@@ -79,6 +98,7 @@ public partial class NetSession
 
     private void OnFocusIn()
     {
+        LogFocusDiag("in");
         _hasFocus = true;
         _inputState = default;
         AdvanceInputEpoch(resetTickToServerEstimate: true);
@@ -95,6 +115,8 @@ public partial class NetSession
         }
 
         _pendingInputs.Clear();
+        _pingSent.Clear();
+        ClearLocalFirePressDiag();
         _lastAckedSeq = _nextInputSeq;
         _jumpPressRepeatTicksRemaining = 0;
         _firePressRepeatTicksRemaining = 0;
@@ -105,6 +127,8 @@ public partial class NetSession
         {
             RebaseClientTickToServerEstimate();
         }
+
+        _nextPingTimeSec = (Time.GetTicksMsec() / 1000.0) + 0.1;
     }
 
     private static void ReleaseGameplayActions()
@@ -115,5 +139,67 @@ public partial class NetSession
         Input.ActionRelease("move_right");
         Input.ActionRelease("jump");
         Input.ActionRelease("fire");
+    }
+
+    private void RecordLocalFirePressDiag(uint fireTick)
+    {
+        if (!IsClient || fireTick == 0)
+        {
+            return;
+        }
+
+        uint desiredHorizonTick = GetDesiredHorizonTick();
+        FirePressDiagSample sample = new()
+        {
+            LocalUsec = (long)Time.GetTicksUsec(),
+            AppliedDelayTicks = _appliedInputDelayTicks,
+            TargetDelayTicks = _targetInputDelayTicks,
+            RttMs = _rttMs,
+            JitterMs = _jitterMs,
+            ClientEstServerTick = _client_est_server_tick,
+            ClientSendTick = _client_send_tick,
+            HorizonGap = (int)desiredHorizonTick - (int)_client_send_tick
+        };
+
+        if (!_firePressDiagByTick.ContainsKey(fireTick))
+        {
+            _firePressDiagOrder.Enqueue(fireTick);
+        }
+
+        _firePressDiagByTick[fireTick] = sample;
+        while (_firePressDiagOrder.Count > FirePressDiagCapacity)
+        {
+            uint oldestTick = _firePressDiagOrder.Dequeue();
+            _firePressDiagByTick.Remove(oldestTick);
+        }
+    }
+
+    private bool TryConsumeLocalFirePressDiag(uint fireTick, out FirePressDiagSample sample)
+    {
+        if (_firePressDiagByTick.TryGetValue(fireTick, out sample))
+        {
+            _firePressDiagByTick.Remove(fireTick);
+            return true;
+        }
+
+        sample = default;
+        return false;
+    }
+
+    private void ClearLocalFirePressDiag()
+    {
+        _firePressDiagByTick.Clear();
+        _firePressDiagOrder.Clear();
+    }
+
+    private void LogFocusDiag(string direction)
+    {
+        uint estimatedTick = _mode == RunMode.Client
+            ? GetEstimatedServerTickNow()
+            : _server_sim_tick;
+        GD.Print(
+            $"FocusDiag: {direction} epoch={_inputEpoch} client_send_tick={_client_send_tick} " +
+            $"est_server_tick={estimatedTick} appliedDelayTicks={_appliedInputDelayTicks} " +
+            $"rtt/jitter={_rttMs:0.0}/{_jitterMs:0.0}ms");
     }
 }

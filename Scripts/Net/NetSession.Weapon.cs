@@ -160,6 +160,21 @@ public partial class NetSession
 
 		if (result.ShooterPeerId == _localPeerId && _localPeerId != 0)
 		{
+			int interpDelayTicks = Mathf.Clamp(MsToTicks(Mathf.Max(0.0f, _config.InterpolationDelayMs)), 0, RewindHistoryTicks - 1);
+			uint fireTick = result.ValidatedServerTick + (uint)interpDelayTicks;
+			if (TryConsumeLocalFirePressDiag(fireTick, out FirePressDiagSample sample))
+			{
+				double dtMs = ((long)Time.GetTicksUsec() - sample.LocalUsec) / 1000.0;
+				GD.Print(
+					$"FireLatencyDiag: fireTick={fireTick} validatedTick={result.ValidatedServerTick} dt_ms={dtMs:0.0} " +
+					$"appliedDelayTicks={sample.AppliedDelayTicks} targetDelayTicks={sample.TargetDelayTicks} " +
+					$"rtt={sample.RttMs:0.0} jitter={sample.JitterMs:0.0} horizon_gap={sample.HorizonGap}");
+			}
+			else
+			{
+				GD.Print($"FireLatencyDiag: missMapping fireTick={fireTick} validatedTick={result.ValidatedServerTick}");
+			}
+
 			ShowHitIndicator(result.HitPeerId >= 0);
 		}
 
