@@ -23,7 +23,9 @@ public readonly struct LocomotionStepResult
 public static class PlayerLocomotion
 {
 	private const float LedgeSupportProbeExtra = 0.05f;
-	private static readonly bool EnableWallRun = false;
+	private const float WallContactMaxAbsY = 0.2f;
+	private const float WallRunIntentMinMoveAxesSq = 0.01f;
+	private static readonly bool EnableWallRun = true;
 	private static readonly bool EnableWallCling = false;
 	private static readonly bool EnableSlide = false;
 
@@ -70,7 +72,36 @@ public static class PlayerLocomotion
 		body.MoveAndSlide();
 
 		bool groundedAfter = body.IsOnFloor();
-		LocomotionMode nextMode = groundedAfter ? LocomotionMode.Grounded : LocomotionMode.Air;
+		Vector3 wallNormalCandidate = ComputeWallNormalCandidate(body, WallContactMaxAbsY);
+		bool hasWallContact = wallNormalCandidate != Vector3.Zero;
+		LocomotionMode nextMode;
+		if (groundedAfter)
+		{
+			nextMode = LocomotionMode.Grounded;
+			state.WallNormal = Vector3.Zero;
+			state.WallRunTicksRemaining = 0;
+		}
+		else if (state.Mode == LocomotionMode.WallRun && hasWallContact && state.WallRunTicksRemaining > 0)
+		{
+			nextMode = LocomotionMode.WallRun;
+			state.WallNormal = wallNormalCandidate;
+			state.WallRunTicksRemaining = Mathf.Max(0, state.WallRunTicksRemaining - 1);
+		}
+		else if (state.Mode == LocomotionMode.Air &&
+				 hasWallContact &&
+				 config.WallRunMaxTicks > 0 &&
+				 IsWallRunIntentActive(input))
+		{
+			nextMode = LocomotionMode.WallRun;
+			state.WallNormal = wallNormalCandidate;
+			state.WallRunTicksRemaining = Mathf.Clamp(config.WallRunMaxTicks, 0, 255);
+		}
+		else
+		{
+			nextMode = LocomotionMode.Air;
+			state.WallNormal = Vector3.Zero;
+			state.WallRunTicksRemaining = 0;
+		}
 		UpdateModeAndCounters(ref state, nextMode);
 		player.SetLocomotionState(state);
 		player.PostSimUpdate();
@@ -79,6 +110,40 @@ public static class PlayerLocomotion
 		// TODO(parkour): when enabled, WallRun should modify gravity and constrain horizontal motion along wall tangent.
 		// TODO(parkour): on wall-jump input, inject exit impulse and transition to Air.
 		return new LocomotionStepResult(wasGrounded, groundedAfter, body.FloorSnapLength, state.Mode);
+	}
+
+	private static Vector3 ComputeWallNormalCandidate(CharacterBody3D body, float maxAbsY)
+	{
+		int collisionCount = body.GetSlideCollisionCount();
+		for (int i = 0; i < collisionCount; i++)
+		{
+			KinematicCollision3D? collision = body.GetSlideCollision(i);
+			if (collision is null)
+			{
+				continue;
+			}
+
+			Vector3 normal = collision.GetNormal();
+			if (Mathf.Abs(normal.Y) >= maxAbsY)
+			{
+				continue;
+			}
+
+			Vector3 wallNormal = new(normal.X, 0.0f, normal.Z);
+			if (wallNormal.LengthSquared() <= 0.000001f)
+			{
+				continue;
+			}
+
+			return wallNormal.Normalized();
+		}
+
+		return Vector3.Zero;
+	}
+
+	private static bool IsWallRunIntentActive(in InputCommand input)
+	{
+		return input.MoveAxes.LengthSquared() >= WallRunIntentMinMoveAxesSq;
 	}
 
 	private static LocomotionMode ResolveActiveMode(LocomotionMode mode, bool wasGrounded)
