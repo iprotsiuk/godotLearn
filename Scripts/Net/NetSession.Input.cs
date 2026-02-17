@@ -1,4 +1,5 @@
 using Godot;
+using NetRunnerSlice.Player.Locomotion;
 
 namespace NetRunnerSlice.Net;
 
@@ -43,7 +44,16 @@ public partial class NetSession
 
     private void TryLatchGroundedJump()
     {
-        if (_localCharacter is null || !_localCharacter.Grounded)
+        if (_localCharacter is null)
+        {
+            return;
+        }
+
+        bool allowJumpPress =
+            _localCharacter.Grounded ||
+            _localCharacter.CurrentLocomotionMode == LocomotionMode.WallRun ||
+            _localCharacter.CurrentLocomotionMode == LocomotionMode.WallCling;
+        if (!allowJumpPress)
         {
             return;
         }

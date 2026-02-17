@@ -22,9 +22,28 @@ public readonly struct LocomotionStepResult
 
 public static class PlayerLocomotion
 {
+	private readonly struct WallRunStepResult
+	{
+		public static WallRunStepResult None => new(forceExitWallRun: false, didWallJump: false, cooldownTicks: 0);
+
+		public readonly bool ForceExitWallRun;
+		public readonly bool DidWallJump;
+		public readonly int CooldownTicks;
+
+		public WallRunStepResult(bool forceExitWallRun, bool didWallJump, int cooldownTicks)
+		{
+			ForceExitWallRun = forceExitWallRun;
+			DidWallJump = didWallJump;
+			CooldownTicks = cooldownTicks;
+		}
+	}
+
 	private const float LedgeSupportProbeExtra = 0.05f;
 	private const float WallContactMaxAbsY = 0.2f;
 	private const float WallRunIntentMinMoveAxesSq = 0.01f;
+	private const float MinNormalLengthSq = 0.000001f;
+	private const float WallRunStickSpeed = 2.0f;
+	private const int WallRunReattachCooldownTicks = 8;
 	private static readonly bool EnableWallRun = true;
 	private static readonly bool EnableWallCling = false;
 	private static readonly bool EnableSlide = false;
@@ -41,7 +60,7 @@ public static class PlayerLocomotion
 
 		bool jumpPressed = (input.Buttons & InputButtons.JumpPressed) != 0;
 		LocomotionMode activeMode = ResolveActiveMode(state.Mode, wasGrounded);
-		bool forceExitWallRun = false;
+		WallRunStepResult wallRunResult = WallRunStepResult.None;
 
 		switch (activeMode)
 		{
@@ -52,11 +71,10 @@ public static class PlayerLocomotion
 				AirStep(input, config, ref velocity, wasGrounded);
 				break;
 			case LocomotionMode.WallRun:
-				forceExitWallRun = WallRunStep(player, input, config, ref velocity, state, jumpPressed, wasGrounded);
-				if (forceExitWallRun)
+				wallRunResult = WallRunStep(player, input, config, ref velocity, state, jumpPressed);
+				if (wallRunResult.ForceExitWallRun)
 				{
 					state.WallNormal = Vector3.Zero;
-					state.WallRunTicksRemaining = 0;
 				}
 				break;
 			case LocomotionMode.WallCling:
@@ -78,8 +96,14 @@ public static class PlayerLocomotion
 		body.MoveAndSlide();
 
 		bool groundedAfter = body.IsOnFloor();
-		Vector3 wallNormalCandidate = ComputeWallNormalCandidate(body, WallContactMaxAbsY);
+		Vector3 wallNormalCandidate = ComputeWallNormalCandidate(body, WallContactMaxAbsY, state.WallNormal);
 		bool hasWallContact = wallNormalCandidate != Vector3.Zero;
+		bool hadAirCooldown = activeMode == LocomotionMode.Air && state.WallRunTicksRemaining > 0;
+		if (hadAirCooldown)
+		{
+			state.WallRunTicksRemaining = Mathf.Max(0, state.WallRunTicksRemaining - 1);
+		}
+
 		LocomotionMode nextMode;
 		if (groundedAfter)
 		{
@@ -87,17 +111,34 @@ public static class PlayerLocomotion
 			state.WallNormal = Vector3.Zero;
 			state.WallRunTicksRemaining = 0;
 		}
-		else if (!forceExitWallRun &&
-				 state.Mode == LocomotionMode.WallRun &&
-				 hasWallContact &&
-				 state.WallRunTicksRemaining > 0)
+		else if (wallRunResult.ForceExitWallRun)
 		{
-			nextMode = LocomotionMode.WallRun;
-			state.WallNormal = wallNormalCandidate;
-			state.WallRunTicksRemaining = Mathf.Max(0, state.WallRunTicksRemaining - 1);
+			nextMode = LocomotionMode.Air;
+			state.WallNormal = Vector3.Zero;
+			state.WallRunTicksRemaining = Mathf.Max(state.WallRunTicksRemaining, wallRunResult.CooldownTicks);
 		}
-		else if (!forceExitWallRun &&
-				 state.Mode == LocomotionMode.Air &&
+		else if (activeMode == LocomotionMode.WallRun)
+		{
+			if (!hasWallContact)
+			{
+				nextMode = LocomotionMode.Air;
+				state.WallNormal = Vector3.Zero;
+			}
+			else if (state.WallRunTicksRemaining <= 1)
+			{
+				nextMode = LocomotionMode.Air;
+				state.WallNormal = Vector3.Zero;
+				state.WallRunTicksRemaining = WallRunReattachCooldownTicks;
+			}
+			else
+			{
+				nextMode = LocomotionMode.WallRun;
+				state.WallNormal = wallNormalCandidate;
+				state.WallRunTicksRemaining = Mathf.Max(0, state.WallRunTicksRemaining - 1);
+			}
+		}
+		else if (!hadAirCooldown &&
+				 activeMode == LocomotionMode.Air &&
 				 hasWallContact &&
 				 config.WallRunMaxTicks > 0 &&
 				 IsWallRunIntentActive(input))
@@ -110,8 +151,8 @@ public static class PlayerLocomotion
 		{
 			nextMode = LocomotionMode.Air;
 			state.WallNormal = Vector3.Zero;
-			state.WallRunTicksRemaining = 0;
 		}
+
 		UpdateModeAndCounters(ref state, nextMode);
 		player.SetLocomotionState(state);
 		player.PostSimUpdate();
@@ -120,8 +161,17 @@ public static class PlayerLocomotion
 		return new LocomotionStepResult(wasGrounded, groundedAfter, body.FloorSnapLength, state.Mode);
 	}
 
-	private static Vector3 ComputeWallNormalCandidate(CharacterBody3D body, float maxAbsY)
+	private static Vector3 ComputeWallNormalCandidate(CharacterBody3D body, float maxAbsY, in Vector3 preferredWallNormal)
 	{
+		Vector3 preferred = new(preferredWallNormal.X, 0.0f, preferredWallNormal.Z);
+		bool hasPreferred = preferred.LengthSquared() > MinNormalLengthSq;
+		if (hasPreferred)
+		{
+			preferred = preferred.Normalized();
+		}
+
+		Vector3 bestNormal = Vector3.Zero;
+		float bestScore = float.NegativeInfinity;
 		int collisionCount = body.GetSlideCollisionCount();
 		for (int i = 0; i < collisionCount; i++)
 		{
@@ -138,15 +188,24 @@ public static class PlayerLocomotion
 			}
 
 			Vector3 wallNormal = new(normal.X, 0.0f, normal.Z);
-			if (wallNormal.LengthSquared() <= 0.000001f)
+			float wallLengthSq = wallNormal.LengthSquared();
+			if (wallLengthSq <= MinNormalLengthSq)
 			{
 				continue;
 			}
 
-			return wallNormal.Normalized();
+			wallNormal = wallNormal.Normalized();
+			float score = hasPreferred ? wallNormal.Dot(preferred) : wallLengthSq;
+			if (score <= bestScore)
+			{
+				continue;
+			}
+
+			bestScore = score;
+			bestNormal = wallNormal;
 		}
 
-		return Vector3.Zero;
+		return bestNormal;
 	}
 
 	private static bool IsWallRunIntentActive(in InputCommand input)
@@ -217,40 +276,54 @@ public static class PlayerLocomotion
 		}
 	}
 
-	private static bool WallRunStep(
+	private static WallRunStepResult WallRunStep(
 		PlayerCharacter player,
 		in InputCommand input,
 		NetworkConfig config,
 		ref Vector3 velocity,
 		in LocomotionState state,
-		bool jumpPressed,
-		bool wasGrounded)
+		bool jumpPressed)
 	{
 		if (!EnableWallRun)
 		{
-			AirStep(input, config, ref velocity, wasGrounded);
-			return false;
+			AirStep(input, config, ref velocity, wasGrounded: false);
+			return WallRunStepResult.None;
 		}
 
 		Vector3 wallNormal = new(state.WallNormal.X, 0.0f, state.WallNormal.Z);
-		if (wallNormal.LengthSquared() <= 0.000001f)
+		if (wallNormal.LengthSquared() <= MinNormalLengthSq)
 		{
-			AirStep(input, config, ref velocity, wasGrounded);
-			return true;
+			AirStep(input, config, ref velocity, wasGrounded: false);
+			return new WallRunStepResult(forceExitWallRun: true, didWallJump: false, cooldownTicks: 0);
 		}
 
 		wallNormal = wallNormal.Normalized();
-		if (jumpPressed && player.CanJump)
+		if (jumpPressed)
 		{
-			velocity = (-wallNormal * config.WallJumpAwayVelocity) + (Vector3.Up * config.WallJumpUpVelocity);
+			Vector3 tangentVelocity = velocity.Slide(wallNormal);
+			velocity = tangentVelocity + (Vector3.Up * config.WallJumpUpVelocity) + (wallNormal * config.WallJumpAwayVelocity);
 			player.OnJump();
-			return true;
+			return new WallRunStepResult(
+				forceExitWallRun: true,
+				didWallJump: true,
+				cooldownTicks: WallRunReattachCooldownTicks);
 		}
 
-		float wallRunAccel = config.AirAcceleration * config.AirControlFactor;
-		ApplyHorizontalConstrainedToWall(input, config.MoveSpeed, wallRunAccel, wallNormal, ref velocity);
+		float normalSpeed = velocity.Dot(wallNormal);
+		if (normalSpeed > 0.0f)
+		{
+			velocity -= wallNormal * normalSpeed;
+			normalSpeed = 0.0f;
+		}
+
+		if (normalSpeed > -WallRunStickSpeed)
+		{
+			velocity += wallNormal * (-WallRunStickSpeed - normalSpeed);
+		}
+
+		ApplyHorizontalConstrainedToWall(input, config.MoveSpeed, config.GroundAcceleration, wallNormal, ref velocity);
 		velocity.Y -= (config.Gravity * config.WallRunGravityScale) * input.DtFixed;
-		return false;
+		return WallRunStepResult.None;
 	}
 
 	private static void WallClingStep(in InputCommand input, NetworkConfig config, ref Vector3 velocity, bool wasGrounded)
@@ -323,7 +396,16 @@ public static class PlayerLocomotion
 
 		Vector3 localWish = new(move.X, 0.0f, -move.Y);
 		Vector3 worldWish = new Basis(Vector3.Up, input.Yaw) * localWish;
-		Vector3 desiredHorizontal = worldWish.Slide(wallNormal) * moveSpeed;
+		Vector3 desiredHorizontal = worldWish.Slide(wallNormal);
+		if (desiredHorizontal.LengthSquared() > MinNormalLengthSq)
+		{
+			desiredHorizontal = desiredHorizontal.Normalized() * moveSpeed;
+		}
+		else
+		{
+			desiredHorizontal = Vector3.Zero;
+		}
+
 		Vector3 horizontalVelocity = new Vector3(velocity.X, 0.0f, velocity.Z).Slide(wallNormal);
 		horizontalVelocity = horizontalVelocity.MoveToward(desiredHorizontal, acceleration * input.DtFixed);
 		velocity.X = horizontalVelocity.X;
@@ -363,7 +445,6 @@ public static class PlayerLocomotion
 		if (state.Mode != LocomotionMode.WallRun && state.Mode != LocomotionMode.WallCling)
 		{
 			state.WallNormal = Vector3.Zero;
-			state.WallRunTicksRemaining = 0;
 		}
 
 		if (state.Mode != LocomotionMode.Slide)
