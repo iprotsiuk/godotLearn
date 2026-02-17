@@ -72,24 +72,29 @@ public partial class NetSession
         MaybeResyncClient("tick_drift_guard");
         UpdateAppliedInputDelayTicks();
 
-        if (_lastAuthoritativeServerTick > 0)
+        uint safeBaseTick = _lastAuthoritativeServerTick == 0
+            ? _client_est_server_tick
+            : System.Math.Max(_lastAuthoritativeServerTick, _client_est_server_tick);
+        uint maxSafeSendTick = safeBaseTick + (uint)NetConstants.MaxFutureInputTicks - 1;
+
+        if (_client_send_tick > maxSafeSendTick)
         {
-            uint maxSafeSendTick = _lastAuthoritativeServerTick + (uint)NetConstants.MaxFutureInputTicks - 1;
-            if (_client_send_tick > maxSafeSendTick)
-            {
-                TriggerClientResync("future_tick_guard", _lastAuthoritativeServerTick);
-                _client_est_server_tick = GetEstimatedServerTickNow();
-            }
+            uint resyncTargetTick = _lastAuthoritativeServerTick > 0
+                ? _lastAuthoritativeServerTick
+                : safeBaseTick;
+            TriggerClientResync("future_tick_guard", resyncTargetTick);
+            _client_est_server_tick = GetEstimatedServerTickNow();
+
+            safeBaseTick = _lastAuthoritativeServerTick == 0
+                ? _client_est_server_tick
+                : System.Math.Max(_lastAuthoritativeServerTick, _client_est_server_tick);
+            maxSafeSendTick = safeBaseTick + (uint)NetConstants.MaxFutureInputTicks - 1;
         }
 
         uint desired_horizon_tick = GetDesiredHorizonTick();
-        if (_lastAuthoritativeServerTick > 0)
+        if (desired_horizon_tick > maxSafeSendTick)
         {
-            uint maxSafeSendTick = _lastAuthoritativeServerTick + (uint)NetConstants.MaxFutureInputTicks - 1;
-            if (desired_horizon_tick > maxSafeSendTick)
-            {
-                desired_horizon_tick = maxSafeSendTick;
-            }
+            desired_horizon_tick = maxSafeSendTick;
         }
 
         if (_localCharacter is not null && desired_horizon_tick < _client_send_tick)
@@ -583,8 +588,9 @@ public partial class NetSession
         double nowSec = nowUsec / 1_000_000.0;
         uint estimatedServerTickNow = GetEstimatedServerTickNow();
         int baseInterpDelayTicks = MsToTicks(Mathf.Max(0.0f, _config.InterpolationDelayMs));
+        float networkInterpBudgetMs = Mathf.Max(0.0f, _jitterMs) + (0.1f * Mathf.Max(0.0f, _rttMs));
         int jitterExtraTicks = MsToTicks(Mathf.Clamp(
-            GlobalInterpJitterScale * _sessionSnapshotJitterEwmaMs,
+            (GlobalInterpJitterScale * _sessionSnapshotJitterEwmaMs) + networkInterpBudgetMs,
             0.0f,
             GlobalInterpMaxExtraMs));
         int targetInterpDelayTicks = Mathf.Clamp(
@@ -791,14 +797,33 @@ public partial class NetSession
 
     private void TriggerClientResync(string reason, uint targetServerTick)
     {
-        if (_mode != RunMode.Client || _netClock is null || targetServerTick == 0)
+        if (_mode != RunMode.Client || _netClock is null)
         {
             return;
         }
 
-        uint beforeTick = _netClock.GetEstimatedServerTick(GetLocalUsec());
-        int beforeError = (int)beforeTick - (int)targetServerTick;
         long nowUsec = GetLocalUsec();
+        uint estNowTick = _netClock.GetEstimatedServerTick(nowUsec);
+        double nowSec = nowUsec / 1_000_000.0;
+        double snapshotAgeSec = _lastAuthoritativeSnapshotAtSec > 0.0
+            ? nowSec - _lastAuthoritativeSnapshotAtSec
+            : double.MaxValue;
+
+        bool replacedTarget = false;
+        uint requestedTargetTick = targetServerTick;
+        if (snapshotAgeSec > 0.25)
+        {
+            targetServerTick = estNowTick;
+            replacedTarget = true;
+        }
+
+        if (targetServerTick == 0)
+        {
+            return;
+        }
+
+        uint beforeTick = estNowTick;
+        int beforeError = (int)beforeTick - (int)targetServerTick;
         _netClock.ForceResync(targetServerTick, nowUsec);
         uint afterTick = _netClock.GetEstimatedServerTick(nowUsec);
         int afterError = (int)afterTick - (int)targetServerTick;
@@ -812,13 +837,13 @@ public partial class NetSession
         _localCharacter?.ClearViewCorrection();
         _resyncTriggered = true;
         _resyncCount++;
-        double nowSec = nowUsec / 1_000_000.0;
         if (nowSec >= _nextResyncDiagLogAtSec)
         {
             _nextResyncDiagLogAtSec = nowSec + JoinDiagnosticsLogIntervalSec;
             GD.Print(
                 $"RESYNC: reason={reason} tickError(before/after)={beforeError}/{afterError} targetTick={targetServerTick} " +
-                $"count={_resyncCount} suppressedDuringJoin={_resyncSuppressedDuringJoinCount}");
+                $"requestedTargetTick={requestedTargetTick} estNowTick={estNowTick} snapshotAgeSec={snapshotAgeSec:F3} " +
+                $"targetReplaced={replacedTarget} count={_resyncCount} suppressedDuringJoin={_resyncSuppressedDuringJoinCount}");
         }
     }
 

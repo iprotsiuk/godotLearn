@@ -5,6 +5,9 @@ namespace NetRunnerSlice.Net;
 
 public partial class NetSession
 {
+    private const float ClientRttOutlierAbsoluteMs = 500.0f;
+    private const float ClientRttOutlierDeviationScale = 6.0f;
+    private const int ClientRttOutlierConsecutiveRequired = 3;
     private const float ServerRttOutlierAbsoluteMs = 250.0f;
     private const float ServerRttOutlierSlackMs = 50.0f;
     private const float ServerRttOutlierJitterScale = 4.0f;
@@ -182,15 +185,32 @@ public partial class NetSession
                     float sampleRtt = (float)((nowSec - sendSec) * 1000.0);
                     _pingSent.Remove(pongSeq);
 
-                    if (_rttMs <= 0.01f)
+                    bool hasBaseline = _rttMs > 0.01f;
+                    float baselineRtt = Mathf.Max(0.0f, _rttMs);
+                    float baselineDev = Mathf.Max(0.0f, _jitterMs);
+                    float outlierThreshold = baselineRtt + (ClientRttOutlierDeviationScale * baselineDev);
+                    bool outlier =
+                        (hasBaseline && sampleRtt > outlierThreshold) ||
+                        sampleRtt > ClientRttOutlierAbsoluteMs;
+                    if (outlier)
                     {
-                        _rttMs = sampleRtt;
+                        _clientRttOutlierStreak++;
+                        if (_clientRttOutlierStreak < ClientRttOutlierConsecutiveRequired)
+                        {
+                            GD.Print(
+                                $"ClientPongOutlierIgnored: sample={sampleRtt:0.0}ms baseline={baselineRtt:0.0}/{baselineDev:0.0}ms " +
+                                $"threshold={outlierThreshold:0.0}ms streak={_clientRttOutlierStreak}");
+                        }
+                        else
+                        {
+                            ApplyClientRttSample(sampleRtt);
+                            _clientRttOutlierStreak = 0;
+                        }
                     }
                     else
                     {
-                        float deltaRtt = Mathf.Abs(sampleRtt - _rttMs);
-                        _rttMs = Mathf.Lerp(_rttMs, sampleRtt, NetConstants.RttEwmaAlpha);
-                        _jitterMs = Mathf.Lerp(_jitterMs, deltaRtt, NetConstants.RttEwmaAlpha);
+                        _clientRttOutlierStreak = 0;
+                        ApplyClientRttSample(sampleRtt);
                     }
 
                     uint serverTick = NetCodec.ReadControlServerTick(packet);
@@ -276,5 +296,19 @@ public partial class NetSession
         _serverRttOutlierStreak[fromPeer] = 0;
 
         UpdateEffectiveInputDelayForPeer(fromPeer, serverPlayer, sendDelayUpdate: true, nowSec);
+    }
+
+    private void ApplyClientRttSample(float sampleRtt)
+    {
+        if (_rttMs <= 0.01f)
+        {
+            _rttMs = sampleRtt;
+            _jitterMs = 0.0f;
+            return;
+        }
+
+        float deltaRtt = Mathf.Abs(sampleRtt - _rttMs);
+        _rttMs = Mathf.Lerp(_rttMs, sampleRtt, NetConstants.RttEwmaAlpha);
+        _jitterMs = Mathf.Lerp(_jitterMs, deltaRtt, NetConstants.RttEwmaAlpha);
     }
 }

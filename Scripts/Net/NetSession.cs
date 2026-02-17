@@ -123,6 +123,7 @@ public partial class NetSession : Node
     private uint _correctionRateWindowCount;
     private float _rttMs;
     private float _jitterMs;
+    private int _clientRttOutlierStreak;
     private bool _logControlPackets;
     private float _dynamicInterpolationDelayMs;
     private int _globalInterpDelayTicks;
@@ -442,6 +443,7 @@ public partial class NetSession : Node
         _correctionRateWindowCount = 0;
         _rttMs = 0.0f;
         _jitterMs = 0.0f;
+        _clientRttOutlierStreak = 0;
         _dynamicInterpolationDelayMs = 0.0f;
         _globalInterpDelayTicks = 0;
         _interpUnderflowExtraTicks = 0;
