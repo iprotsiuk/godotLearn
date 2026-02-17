@@ -33,6 +33,11 @@ public struct PlayerStateSnapshot
     public float Yaw;
     public float Pitch;
     public bool Grounded;
+    public byte LocoMode;
+    public sbyte LocoWallNormalX;
+    public sbyte LocoWallNormalZ;
+    public byte LocoWallRunTicksRemaining;
+    public byte LocoSlideTicksRemaining;
     public uint DroppedOldInputCount;
     public uint DroppedFutureInputCount;
     public uint TicksUsedBufferedInput;

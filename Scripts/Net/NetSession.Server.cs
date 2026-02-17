@@ -385,6 +385,7 @@ public partial class NetSession
         {
             int peerId = pair.Key;
             ServerPlayer player = pair.Value;
+            LocomotionNetState locoNetState = LocomotionNetStateCodec.PackFrom(player.Character.GetLocomotionState());
             _snapshotSendScratch[count++] = new PlayerStateSnapshot
             {
                 PeerId = peerId,
@@ -394,6 +395,11 @@ public partial class NetSession
                 Yaw = player.Character.Yaw,
                 Pitch = player.Character.Pitch,
                 Grounded = player.Character.Grounded,
+                LocoMode = locoNetState.Mode,
+                LocoWallNormalX = locoNetState.WallNormalX,
+                LocoWallNormalZ = locoNetState.WallNormalZ,
+                LocoWallRunTicksRemaining = locoNetState.WallRunTicksRemaining,
+                LocoSlideTicksRemaining = locoNetState.SlideTicksRemaining,
                 DroppedOldInputCount = player.DroppedOldInputCount,
                 DroppedFutureInputCount = player.DroppedFutureInputCount,
                 TicksUsedBufferedInput = player.TicksUsedBufferedInput,

@@ -346,7 +346,14 @@ public partial class NetSession
         Vector3 before = _localCharacter.GlobalPosition;
         _localCharacter.GlobalPosition = snapshot.Pos;
         _localCharacter.Velocity = snapshot.Vel;
-        _localCharacter.ResetLocomotionFromAuthoritative(snapshot.Grounded);
+        LocomotionNetState authoritativeNetState = new(
+            snapshot.LocoMode,
+            snapshot.LocoWallNormalX,
+            snapshot.LocoWallNormalZ,
+            snapshot.LocoWallRunTicksRemaining,
+            snapshot.LocoSlideTicksRemaining);
+        _localCharacter.SetLocomotionState(
+            LocomotionNetStateCodec.UnpackToLocomotionState(snapshot.Grounded, authoritativeNetState));
         _localCharacter.SetGroundedOverride(snapshot.Grounded);
 
         if (snapshot.LastProcessedSeqForThatClient > _lastAckedSeq)

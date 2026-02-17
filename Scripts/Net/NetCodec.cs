@@ -148,6 +148,11 @@ public static partial class NetCodec
         WriteFloat(packet, offset, state.Pitch);
         offset += 4;
         packet[offset++] = state.Grounded ? (byte)1 : (byte)0;
+        packet[offset++] = state.LocoMode;
+        packet[offset++] = unchecked((byte)state.LocoWallNormalX);
+        packet[offset++] = unchecked((byte)state.LocoWallNormalZ);
+        packet[offset++] = state.LocoWallRunTicksRemaining;
+        packet[offset++] = state.LocoSlideTicksRemaining;
         WriteUInt(packet, offset, state.DroppedOldInputCount);
         offset += 4;
         WriteUInt(packet, offset, state.DroppedFutureInputCount);
@@ -189,6 +194,11 @@ public static partial class NetCodec
         state.Pitch = ReadFloat(packet, offset);
         offset += 4;
         state.Grounded = packet[offset++] != 0;
+        state.LocoMode = packet[offset++];
+        state.LocoWallNormalX = unchecked((sbyte)packet[offset++]);
+        state.LocoWallNormalZ = unchecked((sbyte)packet[offset++]);
+        state.LocoWallRunTicksRemaining = packet[offset++];
+        state.LocoSlideTicksRemaining = packet[offset++];
         state.DroppedOldInputCount = ReadUInt(packet, offset);
         offset += 4;
         state.DroppedFutureInputCount = ReadUInt(packet, offset);
