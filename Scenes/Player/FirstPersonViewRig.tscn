@@ -1,39 +1,31 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://dv5uo2qfgtjx7"]
 
-[ext_resource type="Script" path="res://Scripts/Player/View/PlayerCameraEffects.cs" id="1_qwfcp"]
+[ext_resource type="Script" uid="uid://byqc1o2rd2dgd" path="res://Scripts/Player/View/PlayerCameraEffects.cs" id="1_qwfcp"]
+[ext_resource type="PackedScene" uid="uid://df5quxkrembp" path="res://addons/guns/revolver.glb" id="2_revolver"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_1"]
 size = Vector3(0.18, 0.18, 0.5)
 
-[sub_resource type="BoxMesh" id="BoxMesh_freezegun"]
-size = Vector3(0.12, 0.12, 0.45)
+[node name="FirstPersonViewRig" type="Node3D" unique_id=222125520]
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_freezegun"]
-albedo_color = Color(0.26666668, 0.84705883, 1, 1)
-emission_enabled = true
-emission = Color(0.26666668, 0.84705883, 1, 1)
-emission_energy_multiplier = 0.35
-
-[node name="FirstPersonViewRig" type="Node3D"]
-
-[node name="Effects" type="Node3D" parent="."]
+[node name="Effects" type="Node3D" parent="." unique_id=901394464]
 script = ExtResource("1_qwfcp")
 
-[node name="Camera3D" type="Camera3D" parent="Effects"]
-near = 0.05
+[node name="Camera3D" type="Camera3D" parent="Effects" unique_id=687775927]
 far = 500.0
 
-[node name="ArmsRoot" type="Node3D" parent="Effects"]
+[node name="ArmsRoot" type="Node3D" parent="Effects" unique_id=348663723]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.22, -0.18, -0.38)
 
-[node name="ArmsPlaceholder" type="MeshInstance3D" parent="Effects/ArmsRoot"]
+[node name="ArmsPlaceholder" type="MeshInstance3D" parent="Effects/ArmsRoot" unique_id=822551145]
+visible = false
 mesh = SubResource("BoxMesh_1")
 
-[node name="WeaponMount" type="Node3D" parent="Effects"]
+[node name="WeaponMount" type="Node3D" parent="Effects" unique_id=575869667]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.22, -0.2, -0.55)
 
-[node name="FreezeGunView" type="MeshInstance3D" parent="Effects/WeaponMount"]
-visible = false
+[node name="FreezeGunView" type="MeshInstance3D" parent="Effects/WeaponMount" unique_id=1953223615]
 transform = Transform3D(0.9781476, 0.2079117, 0, -0.2079117, 0.9781476, 0, 0, 0, 1, 0.03, -0.02, -0.14)
-mesh = SubResource("BoxMesh_freezegun")
-material_override = SubResource("StandardMaterial3D_freezegun")
+
+[node name="RevolverModel" parent="Effects/WeaponMount/FreezeGunView" unique_id=2104288047 instance=ExtResource("2_revolver")]
+transform = Transform3D(0.0130998185, -0.035197724, 0.1760384, -0.008923907, 0.17616051, 0.035886228, -0.1793007, -0.011339185, 0.011075393, 0.06, -0.05, 0.18)

@@ -89,6 +89,15 @@ public struct FireVisual
     public Vector3 HitPoint;
 }
 
+public struct TagDroneState
+{
+    public int RunnerPeerId;
+    public uint ServerTick;
+    public Vector3 Position;
+    public Vector3 Velocity;
+    public bool Visible;
+}
+
 public struct SessionMetrics
 {
     public float FramesPerSecond;

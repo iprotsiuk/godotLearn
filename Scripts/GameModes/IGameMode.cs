@@ -17,6 +17,10 @@ public interface IGameMode
 
     void ServerOnRoundEnd(MatchManager matchManager, NetSession session);
 
+    void ServerOnTick(MatchManager matchManager, NetSession session, uint tick);
+
+    void ClientOnTick(MatchManager matchManager, NetSession session, uint tick);
+
     void ServerOnPostSimulatePlayer(
         MatchManager matchManager,
         NetSession session,

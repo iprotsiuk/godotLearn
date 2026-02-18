@@ -33,6 +33,10 @@ public sealed class NetworkConfig
     public bool InvertLookY { get; set; } = false;
     public float LocalFov { get; set; } = 90.0f;
     public float PitchClampDegrees { get; set; } = 89.0f;
+    public bool AllowInputWhenUnfocused { get; set; } = true;
+    public bool EnableFrameHitchDiagnostics { get; set; } = true;
+    public float PhysicsHitchThresholdMs { get; set; } = 35.0f;
+    public float ProcessHitchThresholdMs { get; set; } = 45.0f;
 
     public int SimulatedLatencyMs { get; set; } = 0;
     public int SimulatedJitterMs { get; set; } = 0;

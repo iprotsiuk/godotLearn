@@ -460,6 +460,28 @@ public partial class NetSession
         }
     }
 
+    private void HandleTagDroneState(byte[] packet)
+    {
+        if (!IsClient)
+        {
+            return;
+        }
+
+        if (!NetCodec.TryReadTagDroneState(packet, out int runnerPeerId, out uint serverTick, out Vector3 position, out Vector3 velocity, out bool visible))
+        {
+            return;
+        }
+
+        _clientTagDroneStatesByRunner[runnerPeerId] = new TagDroneState
+        {
+            RunnerPeerId = runnerPeerId,
+            ServerTick = serverTick,
+            Position = position,
+            Velocity = velocity,
+            Visible = visible
+        };
+    }
+
     private void ReconcileLocal(in PlayerStateSnapshot snapshot)
     {
         if (_localCharacter is null)

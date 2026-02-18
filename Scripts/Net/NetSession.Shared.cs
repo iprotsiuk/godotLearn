@@ -52,6 +52,9 @@ public partial class NetSession
             case PacketType.FireVisual:
                 HandleFireVisual(packet);
                 break;
+            case PacketType.TagDroneState:
+                HandleTagDroneState(packet);
+                break;
             default:
                 if (IsServer)
                 {
@@ -127,6 +130,7 @@ public partial class NetSession
 
         _clientInventory.Remove(peerId);
         _freezeUntilTickByPeer.Remove(peerId);
+        _clientTagDroneStatesByRunner.Remove(peerId);
 
         if (removedServerPeer)
         {

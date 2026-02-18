@@ -32,6 +32,14 @@ public sealed class FreeRunMode : IGameMode
     {
     }
 
+    public void ServerOnTick(MatchManager matchManager, NetSession session, uint tick)
+    {
+    }
+
+    public void ClientOnTick(MatchManager matchManager, NetSession session, uint tick)
+    {
+    }
+
     public void ServerOnPostSimulatePlayer(
         MatchManager matchManager,
         NetSession session,

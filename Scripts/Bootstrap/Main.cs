@@ -85,6 +85,14 @@ public partial class Main : Node
         _matchManager.Tick(metrics);
         _overlay?.Update(metrics, _session.IsServer, _session.IsClient);
         _hud?.SetHealth(metrics.LocalHealth, metrics.LocalHealthMax);
+        if (_session.TryGetLocalFreezeRemainingSec(out float freezeRemainingSec))
+        {
+            _hud?.SetFreezeFlash(freezeRemainingSec);
+        }
+        else
+        {
+            _hud?.SetFreezeFlash(0.0f);
+        }
         if (_session.TryGetLocalInventoryState(out ItemId itemId, out byte charges, out uint cooldownEndTick) && itemId == ItemId.FreezeGun)
         {
             uint nowTick = _session.IsServer ? metrics.ServerSimTick : metrics.ClientEstServerTick;

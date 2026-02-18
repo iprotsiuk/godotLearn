@@ -50,7 +50,7 @@ public partial class NetSession
     private void CaptureInputState()
     {
         ProcessDeferredFocusOutReset();
-        if (!_hasFocus || IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
+        if (IsFocusInputSuppressed() || IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
         {
             _inputState.MoveAxes = Vector2.Zero;
             _inputState.JumpHeld = false;
@@ -118,6 +118,11 @@ public partial class NetSession
     private void OnFocusOut()
     {
         LogFocusDiag("out");
+        if (_config.AllowInputWhenUnfocused)
+        {
+            return;
+        }
+
         _hasFocus = false;
         _focusOutPending = true;
         _focusOutResetApplied = false;
@@ -128,6 +133,14 @@ public partial class NetSession
     private void OnFocusIn()
     {
         LogFocusDiag("in");
+        if (_config.AllowInputWhenUnfocused)
+        {
+            _hasFocus = true;
+            _focusOutPending = false;
+            _focusOutResetApplied = false;
+            return;
+        }
+
         _hasFocus = true;
         double nowSec = Time.GetTicksMsec() / 1000.0;
         bool transientFocusBlip = _focusOutPending &&
@@ -149,6 +162,11 @@ public partial class NetSession
 
     private void ProcessDeferredFocusOutReset()
     {
+        if (_config.AllowInputWhenUnfocused)
+        {
+            return;
+        }
+
         if (!_focusOutPending || _focusOutResetApplied || _hasFocus)
         {
             return;

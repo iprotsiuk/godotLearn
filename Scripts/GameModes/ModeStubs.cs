@@ -26,6 +26,14 @@ public sealed class RaceModeStub : IGameMode
     {
     }
 
+    public void ServerOnTick(MatchManager matchManager, NetSession session, uint tick)
+    {
+    }
+
+    public void ClientOnTick(MatchManager matchManager, NetSession session, uint tick)
+    {
+    }
+
     public void ServerOnPostSimulatePlayer(
         MatchManager matchManager,
         NetSession session,
@@ -59,6 +67,14 @@ public sealed class TagModeStub : IGameMode
     }
 
     public void ServerOnRoundEnd(MatchManager matchManager, NetSession session)
+    {
+    }
+
+    public void ServerOnTick(MatchManager matchManager, NetSession session, uint tick)
+    {
+    }
+
+    public void ClientOnTick(MatchManager matchManager, NetSession session, uint tick)
     {
     }
 

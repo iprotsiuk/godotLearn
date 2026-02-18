@@ -101,6 +101,44 @@ public static partial class NetCodec
         return true;
     }
 
+    public static void WriteTagDroneState(byte[] packet, int runnerPeerId, uint serverTick, Vector3 position, Vector3 velocity, bool visible)
+    {
+        packet[0] = (byte)PacketType.TagDroneState;
+        packet[1] = visible ? (byte)1 : (byte)0;
+        WriteInt(packet, 2, runnerPeerId);
+        WriteUInt(packet, 6, serverTick);
+        int offset = 10;
+        WriteVector3(packet, ref offset, position);
+        WriteVector3(packet, ref offset, velocity);
+    }
+
+    public static bool TryReadTagDroneState(
+        ReadOnlySpan<byte> packet,
+        out int runnerPeerId,
+        out uint serverTick,
+        out Vector3 position,
+        out Vector3 velocity,
+        out bool visible)
+    {
+        runnerPeerId = 0;
+        serverTick = 0;
+        position = Vector3.Zero;
+        velocity = Vector3.Zero;
+        visible = false;
+        if (packet.Length < NetConstants.TagDroneStatePacketBytes || packet[0] != (byte)PacketType.TagDroneState)
+        {
+            return false;
+        }
+
+        visible = packet[1] != 0;
+        runnerPeerId = ReadInt(packet, 2);
+        serverTick = ReadUInt(packet, 6);
+        int offset = 10;
+        position = ReadVector3(packet, ref offset);
+        velocity = ReadVector3(packet, ref offset);
+        return runnerPeerId > 0;
+    }
+
     private static void WriteInputCommand(byte[] packet, ref int offset, in InputCommand cmd)
     {
         WriteUInt(packet, offset, cmd.Seq);

@@ -97,10 +97,12 @@ public partial class NetSession : Node
     private readonly HashSet<int> _inactivePickups = new();
     private readonly Dictionary<int, uint> _pickupRespawnTickById = new();
     private readonly Dictionary<int, uint> _freezeUntilTickByPeer = new();
+    private readonly Dictionary<int, TagDroneState> _clientTagDroneStatesByRunner = new();
     private readonly List<int> _pickupRespawnReadyScratch = new();
     private readonly byte[] _inputPacket = new byte[NetConstants.InputPacketBytes];
     private readonly byte[] _snapshotPacket = new byte[NetConstants.SnapshotPacketBytes];
     private readonly byte[] _controlPacket = new byte[NetConstants.ControlPacketBytes];
+    private readonly byte[] _tagDroneStatePacket = new byte[NetConstants.TagDroneStatePacketBytes];
     private readonly InputCommand[] _inputDecodeScratch = new InputCommand[NetConstants.MaxInputRedundancy];
     private readonly InputCommand[] _inputSendScratch = new InputCommand[NetConstants.MaxInputRedundancy];
     private readonly PlayerStateSnapshot[] _snapshotDecodeScratch = new PlayerStateSnapshot[NetConstants.MaxPlayers];
@@ -167,6 +169,7 @@ public partial class NetSession : Node
     private bool _focusOutPending;
     private bool _focusOutResetApplied;
     private double _focusOutStartedAtSec;
+    private double _nextFrameHitchLogAtSec;
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
     private uint _lastAckedSeq;
@@ -204,6 +207,9 @@ public partial class NetSession : Node
     public bool IsServer => _mode == RunMode.ListenServer || _mode == RunMode.DedicatedServer;
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
     public int TickRate => Mathf.Max(1, _config.ServerTickRate);
+    public float MoveSpeed => _config.MoveSpeed;
+    public Vector3 SpawnOriginPosition => _hasSpawnOrigin ? _spawnOrigin.Origin : new Vector3(0.0f, 2.0f, 0.0f);
+    public Node3D? PlayerRoot => _playerRoot;
     public SessionMetrics Metrics { get; private set; }
     public MatchConfig CurrentMatchConfig { get; set; } = new()
     {
@@ -251,6 +257,30 @@ public partial class NetSession : Node
         return peers;
     }
 
+    public int[] GetKnownPeerIds()
+    {
+        if (IsServer)
+        {
+            return GetServerPeerIds();
+        }
+
+        List<int> peers = new(_remotePlayers.Count + 1);
+        if (_localPeerId > 0)
+        {
+            peers.Add(_localPeerId);
+        }
+
+        foreach (int peerId in _remotePlayers.Keys)
+        {
+            if (!peers.Contains(peerId))
+            {
+                peers.Add(peerId);
+            }
+        }
+
+        return peers.ToArray();
+    }
+
     /// <summary>
     /// Returns the authoritative server-side character for a peer. Listen-server has duplicate bodies;
     /// do not use scene scanning for gameplay rules.
@@ -285,6 +315,30 @@ public partial class NetSession : Node
             character = serverPlayer.Character;
             // Keep the convenience cache aligned with authoritative server-player state.
             _serverCharactersByPeer[peerId] = serverPlayer.Character;
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryGetAnyCharacter(int peerId, out PlayerCharacter character)
+    {
+        character = null!;
+        if (TryGetServerCharacter(peerId, out PlayerCharacter serverCharacter))
+        {
+            character = serverCharacter;
+            return true;
+        }
+
+        if (_localCharacter is not null && peerId == _localPeerId)
+        {
+            character = _localCharacter;
+            return true;
+        }
+
+        if (_remotePlayers.TryGetValue(peerId, out RemoteEntity? remote))
+        {
+            character = remote.Character;
             return true;
         }
 
@@ -595,6 +649,7 @@ public partial class NetSession : Node
 
     public override void _PhysicsProcess(double delta)
     {
+        LogFrameHitchIfNeeded("physics", delta, _config.PhysicsHitchThresholdMs);
         if (Multiplayer.MultiplayerPeer is not null)
         {
             Multiplayer.Poll();
@@ -622,6 +677,7 @@ public partial class NetSession : Node
 
     public override void _Process(double delta)
     {
+        LogFrameHitchIfNeeded("process", delta, _config.ProcessHitchThresholdMs);
         if (_mode == RunMode.None)
         {
             return;
@@ -634,7 +690,7 @@ public partial class NetSession : Node
 
     public override void _UnhandledInput(InputEvent @event)
     {
-        if (_localCharacter is null || !_hasFocus)
+        if (_localCharacter is null || IsFocusInputSuppressed())
         {
             return;
         }
@@ -664,7 +720,7 @@ public partial class NetSession : Node
 
     public override void _Input(InputEvent @event)
     {
-        if (_localCharacter is null || !_hasFocus || IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
+        if (_localCharacter is null || IsFocusInputSuppressed() || IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
         {
             return;
         }
@@ -681,6 +737,39 @@ public partial class NetSession : Node
         _lookPitch += _config.InvertLookY ? lookY : -lookY;
         _lookPitch = Mathf.Clamp(_lookPitch, -maxPitch, maxPitch);
         _localCharacter.SetLook(_lookYaw, _lookPitch);
+    }
+
+    private bool IsFocusInputSuppressed()
+    {
+        return !_hasFocus && !_config.AllowInputWhenUnfocused;
+    }
+
+    private void LogFrameHitchIfNeeded(string phase, double deltaSec, float thresholdMs)
+    {
+        if (!_config.EnableFrameHitchDiagnostics)
+        {
+            return;
+        }
+
+        float threshold = Mathf.Max(1.0f, thresholdMs);
+        float deltaMs = (float)(deltaSec * 1000.0);
+        if (deltaMs < threshold)
+        {
+            return;
+        }
+
+        double nowSec = Time.GetTicksMsec() / 1000.0;
+        if (nowSec < _nextFrameHitchLogAtSec)
+        {
+            return;
+        }
+
+        _nextFrameHitchLogAtSec = nowSec + 0.2;
+        uint estTick = _mode == RunMode.Client ? GetEstimatedServerTickNow() : _server_sim_tick;
+        GD.Print(
+            $"FrameHitchDiag: phase={phase} dt_ms={deltaMs:0.0} threshold_ms={threshold:0.0} " +
+            $"mode={_mode} hasFocus={_hasFocus} allowUnfocused={_config.AllowInputWhenUnfocused} " +
+            $"serverTick={_server_sim_tick} estTick={estTick}");
     }
 
     public bool StartListenServer(int port)
@@ -860,6 +949,7 @@ public partial class NetSession : Node
         _inactivePickups.Clear();
         _pickupRespawnTickById.Clear();
         _freezeUntilTickByPeer.Clear();
+        _clientTagDroneStatesByRunner.Clear();
         _localFreezeActive = false;
         _localCharacter?.QueueFree();
         _localCharacter = null;
@@ -879,6 +969,10 @@ public partial class NetSession : Node
         };
         _simulator = null;
         _pingSent.Clear();
+        _hasFocus = true;
+        _focusOutPending = false;
+        _focusOutResetApplied = false;
+        _focusOutStartedAtSec = 0.0;
 
         if (Multiplayer.MultiplayerPeer is not null)
         {
@@ -948,6 +1042,54 @@ public partial class NetSession : Node
         }
 
         return false;
+    }
+
+    public bool TryGetLocalFreezeRemainingSec(out float remainingSec)
+    {
+        remainingSec = 0.0f;
+        if (_localPeerId <= 0 || !_freezeUntilTickByPeer.TryGetValue(_localPeerId, out uint freezeUntilTick))
+        {
+            return false;
+        }
+
+        uint nowTick = IsServer ? _server_sim_tick : GetEstimatedServerTickNow();
+        if (freezeUntilTick <= nowTick)
+        {
+            return false;
+        }
+
+        uint remainingTicks = freezeUntilTick - nowTick;
+        remainingSec = remainingTicks / (float)Mathf.Max(1, TickRate);
+        return remainingSec > 0.0f;
+    }
+
+    public void ServerBroadcastTagDroneState(int runnerPeerId, uint serverTick, Vector3 position, Vector3 velocity, bool visible)
+    {
+        if (!IsServer || runnerPeerId <= 0)
+        {
+            return;
+        }
+
+        NetCodec.WriteTagDroneState(_tagDroneStatePacket, runnerPeerId, serverTick, position, velocity, visible);
+        foreach (int peerId in _serverPlayers.Keys)
+        {
+            if (_mode == RunMode.ListenServer && peerId == _localPeerId)
+            {
+                continue;
+            }
+
+            SendPacket(peerId, NetChannels.Snapshot, MultiplayerPeer.TransferModeEnum.UnreliableOrdered, _tagDroneStatePacket);
+        }
+    }
+
+    public bool TryGetClientTagDroneState(int runnerPeerId, out TagDroneState state)
+    {
+        return _clientTagDroneStatesByRunner.TryGetValue(runnerPeerId, out state);
+    }
+
+    public void ClearClientTagDroneStates()
+    {
+        _clientTagDroneStatesByRunner.Clear();
     }
 
     private bool IsLocalWeaponCoolingDownAtTick(uint tick)

@@ -12,7 +12,7 @@ public static class NetChannels
 
 public static class NetConstants
 {
-    public const uint ProtocolVersion = 14;
+    public const uint ProtocolVersion = 15;
     public const int MaxPlayers = 16;
     public const int MaxInputRedundancy = 5;
 
@@ -21,6 +21,7 @@ public static class NetConstants
     public const int FirePacketBytes = 29;
     public const int FireResultPacketBytes = 13;
     public const int FireVisualPacketBytes = 42;
+    public const int TagDroneStatePacketBytes = 34;
 
     public const int InputPacketBytes = 2 + (InputCommandBytes * MaxInputRedundancy);
     public const int SnapshotPacketBytes = 6 + (SnapshotStateBytes * MaxPlayers); // 6 + 94*16 = 1510.
@@ -50,7 +51,8 @@ public enum PacketType : byte
     Control = 3,
     Fire = 4,
     FireResult = 5,
-    FireVisual = 6
+    FireVisual = 6,
+    TagDroneState = 7
 }
 
 public enum ControlType : byte

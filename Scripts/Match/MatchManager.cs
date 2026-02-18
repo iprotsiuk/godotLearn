@@ -140,6 +140,10 @@ public sealed class MatchManager
         if (_session.IsClient)
         {
             TickClientHud(metrics);
+            if (!_session.IsServer)
+            {
+                _activeMode?.ClientOnTick(this, _session, metrics.ClientEstServerTick);
+            }
         }
         else
         {
@@ -182,6 +186,7 @@ public sealed class MatchManager
 
         if (nowTick < PhaseEndTick)
         {
+            _activeMode?.ServerOnTick(this, _session, nowTick);
             return;
         }
 
