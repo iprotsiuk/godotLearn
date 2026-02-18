@@ -858,4 +858,24 @@ public partial class NetSession : Node
 
         return frozen;
     }
+
+    private ItemId GetLocalEquippedItemForClientView()
+    {
+        if (_localPeerId <= 0)
+        {
+            return ItemId.None;
+        }
+
+        if (IsServer && _serverPlayers.TryGetValue(_localPeerId, out ServerPlayer? localServerPlayer))
+        {
+            return localServerPlayer.EquippedItem;
+        }
+
+        if (_clientInventory.TryGetValue(_localPeerId, out (byte ItemId, byte Charges, uint CooldownEndTick) inventory))
+        {
+            return (ItemId)inventory.ItemId;
+        }
+
+        return ItemId.None;
+    }
 }

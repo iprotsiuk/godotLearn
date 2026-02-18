@@ -1,5 +1,6 @@
 // Scripts/Bootstrap/CliArgs.cs
 using Godot;
+using NetRunnerSlice.GameModes;
 
 namespace NetRunnerSlice.Bootstrap;
 
@@ -41,6 +42,8 @@ public sealed class CliArgs
     public int SimSeed { get; private set; } = 1337;
     public NetworkProfile Profile { get; private set; } = NetworkProfile.Wan;
     public bool LogControlPackets { get; private set; }
+    public GameModeId? ForcedMode { get; private set; }
+    public int? ForcedRoundTimeSec { get; private set; }
 
     public static CliArgs Parse(string[] args)
     {
@@ -131,6 +134,19 @@ public sealed class CliArgs
                 case "log-control-packets":
                     parsed.LogControlPackets = value != "0";
                     break;
+                case "mode":
+                    if (TryParseMode(value, out GameModeId mode))
+                    {
+                        parsed.ForcedMode = mode;
+                    }
+                    break;
+                case "round-time":
+                case "round-time-sec":
+                    if (int.TryParse(value, out int roundTimeSec))
+                    {
+                        parsed.ForcedRoundTimeSec = Mathf.Clamp(roundTimeSec, 30, 900);
+                    }
+                    break;
             }
         }
 
@@ -164,5 +180,33 @@ public sealed class CliArgs
         }
 
         return new Vector2I(x, y);
+    }
+
+    private static bool TryParseMode(string raw, out GameModeId mode)
+    {
+        mode = GameModeId.FreeRun;
+        string value = raw.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(value))
+        {
+            return false;
+        }
+
+        switch (value)
+        {
+            case "freerun":
+            case "free_run":
+            case "free":
+            case "1":
+                mode = GameModeId.FreeRun;
+                return true;
+            case "tag":
+            case "tagclassic":
+            case "tag_classic":
+            case "2":
+                mode = GameModeId.TagClassic;
+                return true;
+            default:
+                return false;
+        }
     }
 }

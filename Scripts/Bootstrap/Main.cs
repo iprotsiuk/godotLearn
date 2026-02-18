@@ -52,16 +52,18 @@ public partial class Main : Node
         EnsureSceneRoot();
         EnsureSession();
         HookMultiplayerSignals();
+        GameModeId startupMode = _cli.ForcedMode ?? _menuSettings.SelectedMode;
+        int startupRoundTimeSec = _cli.ForcedRoundTimeSec ?? _menuSettings.RoundTimeSec;
         switch (_cli.Role)
         {
             case StartupRole.Host:
-                StartHost(_cli.Port, _menuSettings.SelectedMode, _menuSettings.RoundTimeSec);
+                StartHost(_cli.Port, startupMode, startupRoundTimeSec);
                 break;
             case StartupRole.Join:
                 StartJoin(_cli.Ip, _cli.Port);
                 break;
             case StartupRole.Dedicated:
-                StartDedicated(_cli.Port);
+                StartDedicated(_cli.Port, startupMode, startupRoundTimeSec);
                 break;
             default:
                 if (!dedicatedMode)
@@ -336,9 +338,13 @@ public partial class Main : Node
         UnloadWorld();
         ShowMenu("Host start failed.");
     }
-    private void StartDedicated(int port)
+    private void StartDedicated(int port, GameModeId selectedMode, int roundTimeSec)
     {
         _matchManager.ResetServerAuthorityState();
+        _menuSettings.SelectedMode = Enum.IsDefined(typeof(GameModeId), selectedMode)
+            ? selectedMode
+            : GameModeId.FreeRun;
+        _menuSettings.RoundTimeSec = Mathf.Clamp(roundTimeSec, 30, 900);
         _joinPending = false;
         _session?.StopSession();
         UnloadWorld();
@@ -347,6 +353,17 @@ public partial class Main : Node
             GD.PushError("Dedicated server failed to load world/session.");
             return;
         }
+        _session.SetCurrentMatchState(new MatchState
+        {
+            RoundIndex = 0,
+            Phase = MatchPhase.Running,
+            PhaseEndTick = 0
+        }, broadcast: false);
+        _session.CurrentMatchConfig = new MatchConfig
+        {
+            ModeId = _menuSettings.SelectedMode,
+            RoundTimeSec = _menuSettings.RoundTimeSec
+        };
         if (!_session.StartDedicatedServer(port))
         {
             UnloadWorld();
@@ -354,7 +371,8 @@ public partial class Main : Node
             return;
         }
         Input.MouseMode = Input.MouseModeEnum.Visible;
-        GD.Print($"DEDICATED SERVER mode: port={port}, tickRate={_config.ServerTickRate}");
+        GD.Print(
+            $"DEDICATED SERVER mode: port={port}, tickRate={_config.ServerTickRate}, mode={_menuSettings.SelectedMode}, roundTimeSec={_menuSettings.RoundTimeSec}");
     }
     private void StartJoin(string ip, int port)
     {

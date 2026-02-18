@@ -89,6 +89,11 @@ public partial class NetSession
             return;
         }
 
+        if (GetLocalEquippedItemForClientView() == NetRunnerSlice.Items.ItemId.None)
+        {
+            return;
+        }
+
         _firePressRepeatTicksRemaining = Mathf.Clamp(1, 1, NetConstants.MaxInputRedundancy);
         RecordLocalFirePressDiag(_client_send_tick);
         TrySpawnPredictedLocalFireVisual();

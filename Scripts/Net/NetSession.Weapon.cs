@@ -55,6 +55,11 @@ public partial class NetSession
 			return;
 		}
 
+		if (shooter.EquippedItem == ItemId.None)
+		{
+			return;
+		}
+
 		bool isFreezeGun = shooter.EquippedItem == ItemId.FreezeGun;
 		if (isFreezeGun)
 		{
@@ -689,6 +694,11 @@ public partial class NetSession
 	private void TrySpawnPredictedLocalFireVisual()
 	{
 		if (!IsClient || _localCharacter is null)
+		{
+			return;
+		}
+
+		if (GetLocalEquippedItemForClientView() == ItemId.None)
 		{
 			return;
 		}

@@ -1,6 +1,7 @@
 // Scripts/Net/NetSession.Client.cs
 using System.Collections.Generic;
 using Godot;
+using NetRunnerSlice.Items;
 using NetRunnerSlice.Player;
 
 namespace NetRunnerSlice.Net;
@@ -48,6 +49,7 @@ public partial class NetSession
 
     private void TickClient(float delta)
     {
+        UpdateLocalWeaponView();
         ulong nowUsec = (ulong)GetLocalUsec();
         double nowSec = nowUsec / 1_000_000.0;
         float realDeltaSec = 0.0f;
@@ -158,6 +160,34 @@ public partial class NetSession
         }
 
         _lastClientTickUsec = nowUsec;
+    }
+
+    private void UpdateLocalWeaponView()
+    {
+        if (_localCharacter is null)
+        {
+            return;
+        }
+
+        Camera3D? camera = _localCharacter.LocalCamera;
+        if (camera is null || !GodotObject.IsInstanceValid(camera))
+        {
+            return;
+        }
+
+        Node? effects = camera.GetParent();
+        if (effects is null)
+        {
+            return;
+        }
+
+        MeshInstance3D? freezeGunView = effects.GetNodeOrNull<MeshInstance3D>("WeaponMount/FreezeGunView");
+        if (freezeGunView is null)
+        {
+            return;
+        }
+
+        freezeGunView.Visible = GetLocalEquippedItemForClientView() == ItemId.FreezeGun;
     }
 
     private int GetClientInputDelayTicksForStamping()
