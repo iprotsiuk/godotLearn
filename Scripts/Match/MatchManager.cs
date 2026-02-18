@@ -424,7 +424,7 @@ public sealed class MatchManager
 
         if (IsWaitingForTagPlayers())
         {
-            return false;
+            return true;
         }
 
         if (SpectatorsUntilNextRound.Contains(peerId))
