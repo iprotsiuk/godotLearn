@@ -403,6 +403,8 @@ public partial class NetSession
             {
                 PeerId = peerId,
                 LastProcessedSeqForThatClient = player.LastProcessedSeq,
+                HealthCurrent = player.HealthCurrent,
+                HealthMax = player.HealthMax,
                 Pos = player.Character.GlobalPosition,
                 Vel = player.Character.Velocity,
                 Yaw = player.Character.Yaw,

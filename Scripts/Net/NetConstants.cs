@@ -12,18 +12,18 @@ public static class NetChannels
 
 public static class NetConstants
 {
-    public const uint ProtocolVersion = 8;
+    public const uint ProtocolVersion = 9;
     public const int MaxPlayers = 16;
     public const int MaxInputRedundancy = 5;
 
     public const int InputCommandBytes = 33;
-    public const int SnapshotStateBytes = 86; // 81 base + 5 packed locomotion bytes.
+    public const int SnapshotStateBytes = 94; // 89 base + 5 packed locomotion bytes.
     public const int FirePacketBytes = 29;
     public const int FireResultPacketBytes = 13;
     public const int FireVisualPacketBytes = 42;
 
     public const int InputPacketBytes = 2 + (InputCommandBytes * MaxInputRedundancy);
-    public const int SnapshotPacketBytes = 6 + (SnapshotStateBytes * MaxPlayers); // 6 + 86*16 = 1382.
+    public const int SnapshotPacketBytes = 6 + (SnapshotStateBytes * MaxPlayers); // 6 + 94*16 = 1510.
     public const int ControlPacketBytes = 96;
 
     public const int MinWanInputDelayTicks = 2;

@@ -16,6 +16,8 @@ public partial class NetSession : Node
     private const float WeaponMaxRange = 200.0f;
     private const float WeaponTargetRadius = 0.5f;
     private const float WeaponOriginMaxOffset = 1.5f;
+    private const int MaxPlayerHealth = 100;
+    private const int WeaponHitDamage = 19;
 
     private enum RunMode
     {
@@ -49,6 +51,8 @@ public partial class NetSession : Node
         public uint TicksUsedNeutral;
         public uint MissingInputStreakCurrent;
         public uint MissingInputStreakMax;
+        public int HealthCurrent = MaxPlayerHealth;
+        public int HealthMax = MaxPlayerHealth;
         public readonly byte[] UsageWindow = new byte[120];
         public int UsageWindowWriteIndex;
         public int UsageWindowCount;
@@ -179,6 +183,8 @@ public partial class NetSession : Node
     private uint _resyncCount;
     private uint _resyncSuppressedDuringJoinCount;
     private double _nextResyncDiagLogAtSec;
+    private int _localHealth = MaxPlayerHealth;
+    private int _localHealthMax = MaxPlayerHealth;
     private PlayerCharacter? _localCharacter;
     public bool IsServer => _mode == RunMode.ListenServer || _mode == RunMode.DedicatedServer;
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
@@ -488,6 +494,8 @@ public partial class NetSession : Node
         _resyncCount = 0;
         _resyncSuppressedDuringJoinCount = 0;
         _nextResyncDiagLogAtSec = 0.0;
+        _localHealth = MaxPlayerHealth;
+        _localHealthMax = MaxPlayerHealth;
         ClearProjectileVisuals();
         ClearHitIndicator();
         foreach ((Node3D node, _) in _debugDrawNodes)

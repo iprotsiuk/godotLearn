@@ -271,6 +271,9 @@ public partial class NetSession
                 rttMs = localServerPlayer.RttMs;
                 jitterMs = localServerPlayer.JitterMs;
             }
+
+            _localHealth = localServerPlayer.HealthCurrent;
+            _localHealthMax = localServerPlayer.HealthMax;
         }
 
         int inputDelayTicksMetric = IsClient ? _appliedInputDelayTicks : _config.ServerInputDelayTicks;
@@ -325,7 +328,9 @@ public partial class NetSession
             ServerMissingInputStreakMax = serverMissingInputStreakMax,
             ServerEffectiveDelayTicks = serverEffectiveDelayTicks,
             ServerPeerRttMs = serverPeerRttMs,
-            ServerPeerJitterMs = serverPeerJitterMs
+            ServerPeerJitterMs = serverPeerJitterMs,
+            LocalHealth = _localHealth,
+            LocalHealthMax = _localHealthMax
         };
     }
 

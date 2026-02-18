@@ -17,6 +17,8 @@ public partial class NetSession
 		public required MeshInstance3D Node;
 		public Vector3 Velocity;
 		public double ExpireAtSec;
+		public bool HasTargetPoint;
+		public Vector3 TargetPoint;
 	}
 
 	private readonly List<VisualProjectile> _visualProjectiles = new(32);
@@ -75,8 +77,17 @@ public partial class NetSession
 		Vector3 origin = ClampShotOrigin(shooterPeerId, fireTick, shooterPosAtFire + new Vector3(0.0f, 1.55f, 0.0f));
 
 		int hitPeer = -1;
+		float maxShotDistance = WeaponMaxRange;
 		Vector3 hitPoint = origin + (rayDirection * WeaponMaxRange);
-		if (TryFindRayHitAtTick(shooterPeerId, targetTick, origin, rayDirection, out int foundPeer, out Vector3 foundPoint))
+		bool blockedByWorld = false;
+		if (TryGetWorldRayBlockDistance(shooterPeerId, origin, rayDirection, out float worldBlockDistance, out Vector3 worldBlockPoint))
+		{
+			maxShotDistance = Mathf.Max(0.0f, worldBlockDistance);
+			hitPoint = worldBlockPoint;
+			blockedByWorld = true;
+		}
+
+		if (TryFindRayHitAtTick(shooterPeerId, targetTick, origin, rayDirection, maxShotDistance, out int foundPeer, out Vector3 foundPoint))
 		{
 			hitPeer = foundPeer;
 			hitPoint = foundPoint;
@@ -112,6 +123,7 @@ public partial class NetSession
 		};
 		if (hitPeer >= 0)
 		{
+			ApplyWeaponDamage(hitPeer, WeaponHitDamage);
 			GD.Print($"ServerHit: shooter={shooterPeerId} target={hitPeer} fireTick={fireTick} targetTick={targetTick}");
 		}
 		else
@@ -130,7 +142,7 @@ public partial class NetSession
 			Yaw = DirectionToYaw(rayDirection),
 			Pitch = DirectionToPitch(rayDirection),
 			HitPoint = hitPoint,
-			DidHit = hitPeer >= 0
+			DidHit = hitPeer >= 0 || blockedByWorld
 		};
 		NetCodec.WriteFireVisual(_fireVisualPacket, visual);
 		BroadcastFireVisual(_fireVisualPacket);
@@ -327,11 +339,11 @@ public partial class NetSession
 		_rewindRestoreScratch.Clear();
 	}
 
-	private bool TryFindRayHitAtTick(int shooterPeerId, uint tick, Vector3 origin, Vector3 direction, out int hitPeerId, out Vector3 hitPoint)
+	private bool TryFindRayHitAtTick(int shooterPeerId, uint tick, Vector3 origin, Vector3 direction, float maxDistance, out int hitPeerId, out Vector3 hitPoint)
 	{
 		hitPeerId = -1;
-		hitPoint = origin + (direction * WeaponMaxRange);
-		float bestDistance = WeaponMaxRange + 0.001f;
+		hitPoint = origin + (direction * maxDistance);
+		float bestDistance = maxDistance + 0.001f;
 
 		foreach (KeyValuePair<int, ServerPlayer> pair in _serverPlayers)
 		{
@@ -341,10 +353,15 @@ public partial class NetSession
 				continue;
 			}
 
+			if (pair.Value.HealthCurrent <= 0)
+			{
+				continue;
+			}
+
 			Vector3 targetPos = pair.Value.Character.GlobalPosition;
 			TryGetHistoricalPosition(peerId, tick, out targetPos);
 			Vector3 center = targetPos + new Vector3(0.0f, 0.9f, 0.0f);
-			if (!TryRaySphereHit(origin, direction, center, WeaponTargetRadius, WeaponMaxRange, out float distance))
+			if (!TryRaySphereHit(origin, direction, center, WeaponTargetRadius, maxDistance, out float distance))
 			{
 				continue;
 			}
@@ -360,6 +377,55 @@ public partial class NetSession
 		}
 
 		return hitPeerId >= 0;
+	}
+
+	private bool TryGetWorldRayBlockDistance(int shooterPeerId, Vector3 origin, Vector3 direction, out float blockDistance, out Vector3 blockPoint)
+	{
+		blockDistance = WeaponMaxRange;
+		blockPoint = origin + (direction * WeaponMaxRange);
+
+		if (!_serverPlayers.TryGetValue(shooterPeerId, out ServerPlayer? shooter))
+		{
+			return false;
+		}
+
+		World3D? world = shooter.Character.GetWorld3D();
+		if (world is null)
+		{
+			return false;
+		}
+
+		PhysicsRayQueryParameters3D query = PhysicsRayQueryParameters3D.Create(origin, blockPoint);
+		query.CollideWithAreas = false;
+		query.CollideWithBodies = true;
+
+		Godot.Collections.Array<Rid> exclude = new();
+		foreach (KeyValuePair<int, ServerPlayer> pair in _serverPlayers)
+		{
+			exclude.Add(pair.Value.Character.GetRid());
+		}
+
+		query.Exclude = exclude;
+		Godot.Collections.Dictionary hit = world.DirectSpaceState.IntersectRay(query);
+		if (hit.Count == 0 || !hit.ContainsKey("position"))
+		{
+			return false;
+		}
+
+		blockPoint = (Vector3)hit["position"];
+		blockDistance = origin.DistanceTo(blockPoint);
+		return true;
+	}
+
+	private void ApplyWeaponDamage(int targetPeerId, int damage)
+	{
+		if (damage <= 0 || !_serverPlayers.TryGetValue(targetPeerId, out ServerPlayer? target))
+		{
+			return;
+		}
+
+		int nextHealth = Mathf.Max(0, target.HealthCurrent - damage);
+		target.HealthCurrent = nextHealth;
 	}
 
 	private bool TryComputeClosestApproachAtTick(
@@ -608,7 +674,13 @@ public partial class NetSession
 		}
 
 		direction = direction.Normalized();
-		SpawnRemoteProjectile(origin, origin + (direction * WeaponMaxRange));
+		Vector3 targetPoint = origin + (direction * WeaponMaxRange);
+		if (TryGetLocalVisualWorldImpactPoint(origin, direction, out Vector3 wallPoint))
+		{
+			targetPoint = wallPoint;
+		}
+
+		SpawnRemoteProjectile(origin, targetPoint);
 	}
 
 	private void SpawnRemoteProjectile(Vector3 origin, Vector3 hitPoint)
@@ -638,8 +710,38 @@ public partial class NetSession
 		{
 			Node = projectile,
 			Velocity = direction * VisualProjectileSpeed,
-			ExpireAtSec = nowSec + VisualProjectileLifetimeSec
+			ExpireAtSec = nowSec + VisualProjectileLifetimeSec,
+			HasTargetPoint = true,
+			TargetPoint = hitPoint
 		});
+	}
+
+	private bool TryGetLocalVisualWorldImpactPoint(Vector3 origin, Vector3 direction, out Vector3 impactPoint)
+	{
+		impactPoint = origin + (direction * WeaponMaxRange);
+		if (_localCharacter is null)
+		{
+			return false;
+		}
+
+		World3D? world = _localCharacter.GetWorld3D();
+		if (world is null)
+		{
+			return false;
+		}
+
+		PhysicsRayQueryParameters3D query = PhysicsRayQueryParameters3D.Create(origin, impactPoint);
+		query.CollideWithAreas = false;
+		query.CollideWithBodies = true;
+		query.Exclude = new Godot.Collections.Array<Rid> { _localCharacter.GetRid() };
+		Godot.Collections.Dictionary hit = world.DirectSpaceState.IntersectRay(query);
+		if (hit.Count == 0 || !hit.ContainsKey("position"))
+		{
+			return false;
+		}
+
+		impactPoint = (Vector3)hit["position"];
+		return true;
 	}
 
 	private void UpdateProjectileVisuals(double nowSec)
@@ -658,12 +760,28 @@ public partial class NetSession
 			bool expired = projectile.ExpireAtSec <= nowSec || !GodotObject.IsInstanceValid(projectile.Node);
 			if (!expired)
 			{
-				projectile.Node.GlobalPosition += projectile.Velocity * dt;
+				Vector3 currentPos = projectile.Node.GlobalPosition;
+				Vector3 nextPos = currentPos + (projectile.Velocity * dt);
+				if (projectile.HasTargetPoint)
+				{
+					Vector3 toTarget = projectile.TargetPoint - currentPos;
+					Vector3 step = nextPos - currentPos;
+					bool reachedTarget = step.Dot(toTarget) >= 0.0f && step.LengthSquared() >= toTarget.LengthSquared();
+					if (reachedTarget)
+					{
+						nextPos = projectile.TargetPoint;
+						expired = true;
+					}
+				}
+
+				projectile.Node.GlobalPosition = nextPos;
 				_visualProjectiles[i] = projectile;
+			}
+			if (!expired)
+			{
 				i++;
 				continue;
 			}
-
 			if (GodotObject.IsInstanceValid(projectile.Node))
 			{
 				projectile.Node.QueueFree();

@@ -4,11 +4,13 @@ using NetRunnerSlice.Debug;
 using NetRunnerSlice.GameModes;
 using NetRunnerSlice.Net;
 using NetRunnerSlice.UI;
+using NetRunnerSlice.UI.Hud;
 using NetRunnerSlice.UI.Menu;
 namespace NetRunnerSlice.Bootstrap;
 public partial class Main : Node
 {
     private const string MainMenuScenePath = "res://Scenes/UI/MainMenu.tscn";
+    private const string HudScenePath = "res://Scenes/UI/Hud/Hud.tscn";
     private const string TestWorldScenePath = "res://Scenes/testWorld.tscn";
     private readonly IGameMode _gameMode = new FreeRunMode();
     private CliArgs? _cli;
@@ -16,6 +18,7 @@ public partial class Main : Node
     private NetSession? _session;
     private MainMenu? _menu;
     private DebugOverlay? _overlay;
+    private Hud? _hud;
     private Node? _sceneRoot;
     private CanvasLayer? _uiRoot;
     private Node3D? _activeWorld;
@@ -70,11 +73,14 @@ public partial class Main : Node
     }
     public override void _Process(double delta)
     {
-        if (_session is null || _overlay is null)
+        if (_session is null)
         {
             return;
         }
-        _overlay.Update(_session.Metrics, _session.IsServer, _session.IsClient);
+
+        SessionMetrics metrics = _session.Metrics;
+        _overlay?.Update(metrics, _session.IsServer, _session.IsClient);
+        _hud?.SetHealth(metrics.LocalHealth, metrics.LocalHealthMax);
     }
     public override void _UnhandledInput(InputEvent @event)
     {
@@ -87,6 +93,7 @@ public partial class Main : Node
         if (canResumeGameplay && _menu is not null && _menu.Visible)
         {
             _menu.Hide();
+            _hud?.Show();
             Input.MouseMode = Input.MouseModeEnum.Captured;
             GetViewport().SetInputAsHandled();
             return;
@@ -94,6 +101,7 @@ public partial class Main : Node
 
         _menu?.OpenMainScreen();
         _menu?.Show();
+        _hud?.Hide();
         Input.MouseMode = Input.MouseModeEnum.Visible;
         GetViewport().SetInputAsHandled();
     }
@@ -153,6 +161,12 @@ public partial class Main : Node
         }
 
         PackedScene menuScene = GD.Load<PackedScene>(MainMenuScenePath);
+        PackedScene hudScene = GD.Load<PackedScene>(HudScenePath);
+        _hud = hudScene.Instantiate<Hud>();
+        _hud.Name = "Hud";
+        _hud.Hide();
+        _uiRoot.AddChild(_hud);
+
         _menu = menuScene.Instantiate<MainMenu>();
         _menu.Name = "MainMenu";
         _uiRoot.AddChild(_menu);
@@ -283,6 +297,7 @@ public partial class Main : Node
         if (_session.StartListenServer(port))
         {
             _menu?.Hide();
+            _hud?.Show();
             Input.MouseMode = Input.MouseModeEnum.Captured;
             return;
         }
@@ -332,6 +347,7 @@ public partial class Main : Node
     {
         _menu?.Show();
         _menu?.SetStatus(status);
+        _hud?.Hide();
         Input.MouseMode = Input.MouseModeEnum.Visible;
     }
     private void OnConnectedToServer()
@@ -351,6 +367,7 @@ public partial class Main : Node
         _joinPending = false;
         _menu?.SetStatus($"Connected to {_pendingJoinIp}:{_pendingJoinPort}");
         _menu?.Hide();
+        _hud?.Show();
         Input.MouseMode = Input.MouseModeEnum.Captured;
     }
     private void OnConnectionFailed()
@@ -406,4 +423,5 @@ public partial class Main : Node
     {
         Engine.MaxFps = _menuSettings.FpsLock <= 0 ? 0 : _menuSettings.FpsLock;
     }
+
 }

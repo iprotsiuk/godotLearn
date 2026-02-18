@@ -156,6 +156,10 @@ public static partial class NetCodec
         offset += 4;
         WriteUInt(packet, offset, state.LastProcessedSeqForThatClient);
         offset += 4;
+        WriteInt(packet, offset, state.HealthCurrent);
+        offset += 4;
+        WriteInt(packet, offset, state.HealthMax);
+        offset += 4;
         WriteVector3(packet, ref offset, state.Pos);
         WriteVector3(packet, ref offset, state.Vel);
         WriteFloat(packet, offset, state.Yaw);
@@ -201,6 +205,10 @@ public static partial class NetCodec
         state.PeerId = ReadInt(packet, offset);
         offset += 4;
         state.LastProcessedSeqForThatClient = ReadUInt(packet, offset);
+        offset += 4;
+        state.HealthCurrent = ReadInt(packet, offset);
+        offset += 4;
+        state.HealthMax = ReadInt(packet, offset);
         offset += 4;
         state.Pos = ReadVector3(packet, ref offset);
         state.Vel = ReadVector3(packet, ref offset);

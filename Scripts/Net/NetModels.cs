@@ -28,6 +28,8 @@ public struct PlayerStateSnapshot
 {
     public int PeerId;
     public uint LastProcessedSeqForThatClient;
+    public int HealthCurrent;
+    public int HealthMax;
     public Vector3 Pos;
     public Vector3 Vel;
     public float Yaw;
@@ -134,4 +136,6 @@ public struct SessionMetrics
     public int ServerEffectiveDelayTicks;
     public float ServerPeerRttMs;
     public float ServerPeerJitterMs;
+    public int LocalHealth;
+    public int LocalHealthMax;
 }

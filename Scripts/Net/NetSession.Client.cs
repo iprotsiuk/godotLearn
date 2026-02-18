@@ -426,6 +426,8 @@ public partial class NetSession
         _serverEffectiveDelayTicks = snapshot.EffectiveDelayTicks;
         _serverPeerRttMs = snapshot.ServerPeerRttMs;
         _serverPeerJitterMs = snapshot.ServerPeerJitterMs;
+        _localHealth = snapshot.HealthCurrent;
+        _localHealthMax = snapshot.HealthMax;
         double snapshotNowSec = Time.GetTicksMsec() / 1000.0;
         if (_lastSeenDroppedFutureAtSec > 0.0)
         {
