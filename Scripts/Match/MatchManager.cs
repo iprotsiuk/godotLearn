@@ -61,6 +61,7 @@ public sealed class MatchManager
         _lastClientConfig = SanitizeMatchConfig(session.CurrentMatchConfig);
         _lastClientState = SanitizeMatchState(session.CurrentMatchState);
         _lastClientTagState = SanitizeTagState(session.CurrentTagState);
+        session.ServerCanPickupItem = ServerCanPickupItem;
 
         session.MatchConfigReceived += OnMatchConfigReceived;
         session.MatchStateReceived += OnMatchStateReceived;
@@ -85,6 +86,7 @@ public sealed class MatchManager
         _session.ServerPeerJoined -= OnServerPeerJoined;
         _session.ServerPeerLeft -= OnServerPeerLeft;
         _session.ServerPostSimulatePlayer -= OnServerPostSimulatePlayer;
+        _session.ServerCanPickupItem = null;
 
         _session = null;
         _serverActive = false;
@@ -300,6 +302,8 @@ public sealed class MatchManager
         PhaseEndTick = nowTick + durationTicks;
 
         PublishState();
+        _session.ServerClearAllEquippedItems();
+        _session.ServerResetAllPickups();
         _activeMode?.ServerOnRoundStart(this, _session);
     }
 
@@ -399,6 +403,46 @@ public sealed class MatchManager
         }
 
         _activeMode?.ServerOnPostSimulatePlayer(this, _session, peerId, serverCharacter, cmd, tick);
+    }
+
+    private bool ServerCanPickupItem(int peerId)
+    {
+        if (_session is null || !_session.IsServer || !_serverActive)
+        {
+            return false;
+        }
+
+        if (Phase != MatchPhase.Running)
+        {
+            return false;
+        }
+
+        if (_activeModeId != GameModeId.TagClassic)
+        {
+            return true;
+        }
+
+        if (IsWaitingForTagPlayers())
+        {
+            return false;
+        }
+
+        if (SpectatorsUntilNextRound.Contains(peerId))
+        {
+            return false;
+        }
+
+        if (!RoundParticipants.Contains(peerId))
+        {
+            return false;
+        }
+
+        if (_session.CurrentTagState.ItPeerId == peerId)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private void OnMatchConfigReceived(MatchConfig config)

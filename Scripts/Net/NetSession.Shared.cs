@@ -125,6 +125,9 @@ public partial class NetSession
             _remotePlayers.Remove(peerId);
         }
 
+        _clientInventory.Remove(peerId);
+        _freezeUntilTickByPeer.Remove(peerId);
+
         if (removedServerPeer)
         {
             ServerPeerLeft?.Invoke(peerId);

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using Godot;
 using NetRunnerSlice.GameModes;
+using NetRunnerSlice.Items;
 using NetRunnerSlice.Player;
 
 namespace NetRunnerSlice.Net;
@@ -54,6 +55,9 @@ public partial class NetSession : Node
         public uint MissingInputStreakMax;
         public int HealthCurrent = MaxPlayerHealth;
         public int HealthMax = MaxPlayerHealth;
+        public ItemId EquippedItem = ItemId.None;
+        public byte EquippedCharges;
+        public uint EquippedCooldownEndTick;
         public readonly byte[] UsageWindow = new byte[120];
         public int UsageWindowWriteIndex;
         public int UsageWindowCount;
@@ -88,6 +92,10 @@ public partial class NetSession : Node
     private readonly Dictionary<int, ServerPlayer> _serverPlayers = new();
     private readonly Dictionary<int, PlayerCharacter> _serverCharactersByPeer = new();
     private readonly Dictionary<int, RemoteEntity> _remotePlayers = new();
+    private readonly Dictionary<int, (byte ItemId, byte Charges, uint CooldownEndTick)> _clientInventory = new();
+    private readonly Dictionary<int, PickupItem> _pickups = new();
+    private readonly HashSet<int> _inactivePickups = new();
+    private readonly Dictionary<int, uint> _freezeUntilTickByPeer = new();
     private readonly byte[] _inputPacket = new byte[NetConstants.InputPacketBytes];
     private readonly byte[] _snapshotPacket = new byte[NetConstants.SnapshotPacketBytes];
     private readonly byte[] _controlPacket = new byte[NetConstants.ControlPacketBytes];
@@ -122,6 +130,9 @@ public partial class NetSession : Node
     private int _simSeed;
     private float _lookYaw;
     private float _lookPitch;
+    private float _frozenYaw;
+    private float _frozenPitch;
+    private bool _localFreezeActive;
     private float _lastCorrectionMeters;
     private float _lastCorrectionXZMeters;
     private float _lastCorrectionYMeters;
@@ -214,6 +225,7 @@ public partial class NetSession : Node
     public event System.Action<MatchState>? MatchStateReceived;
     public event System.Action<TagState>? TagStateFullReceived;
     public event System.Action<TagState>? TagStateDeltaReceived;
+    public event System.Action<int>? InventoryStateReceived;
     public event System.Action<int>? ServerPeerJoined;
     public event System.Action<int>? ServerPeerLeft;
     public event System.Action<int, PlayerCharacter, InputCommand, uint>? ServerPostSimulatePlayer;
@@ -222,6 +234,8 @@ public partial class NetSession : Node
     /// do not use scene scanning for gameplay rules.
     /// </summary>
     public IReadOnlyDictionary<int, PlayerCharacter> ServerPlayers => _serverCharactersByPeer;
+    public IReadOnlyDictionary<int, (byte ItemId, byte Charges, uint CooldownEndTick)> ClientInventory => _clientInventory;
+    public System.Func<int, bool>? ServerCanPickupItem;
 
     public int[] GetServerPeerIds()
     {
@@ -266,6 +280,33 @@ public partial class NetSession : Node
         return false;
     }
 
+    public bool TryGetClientInventory(int peerId, out byte itemId, out byte charges, out uint cooldownEndTick)
+    {
+        itemId = 0;
+        charges = 0;
+        cooldownEndTick = 0;
+        if (!_clientInventory.TryGetValue(peerId, out (byte ItemId, byte Charges, uint CooldownEndTick) state))
+        {
+            return false;
+        }
+
+        itemId = state.ItemId;
+        charges = state.Charges;
+        cooldownEndTick = state.CooldownEndTick;
+        return true;
+    }
+
+    public void RegisterPickup(PickupItem item)
+    {
+        _pickups[item.PickupId] = item;
+        item.SetActive(!_inactivePickups.Contains(item.PickupId));
+    }
+
+    public void UnregisterPickup(int pickupId)
+    {
+        _pickups.Remove(pickupId);
+    }
+
     public bool RespawnServerPeerAtSpawn(int peerId)
     {
         if (!_serverPlayers.TryGetValue(peerId, out ServerPlayer? player))
@@ -273,6 +314,7 @@ public partial class NetSession : Node
             return false;
         }
 
+        ServerClearEquippedItem(peerId);
         PlayerCharacter character = player.Character;
         character.GlobalPosition = SpawnPointForPeer(peerId);
         character.Velocity = Vector3.Zero;
@@ -280,6 +322,151 @@ public partial class NetSession : Node
         character.ResetLocomotionFromAuthoritative(grounded: false);
         character.ResetInterpolationAfterSnap();
         return true;
+    }
+
+    public bool ServerTryEquipItem(int peerId, ItemId item, byte charges)
+    {
+        if (!IsServer)
+        {
+            return false;
+        }
+
+        if (!_serverPlayers.TryGetValue(peerId, out ServerPlayer? player))
+        {
+            return false;
+        }
+
+        if (player.EquippedItem != ItemId.None)
+        {
+            return false;
+        }
+
+        player.EquippedItem = item;
+        player.EquippedCharges = charges;
+        player.EquippedCooldownEndTick = 0;
+        BroadcastInventoryStateForPeer(peerId);
+        return true;
+    }
+
+    public void ServerClearEquippedItem(int peerId)
+    {
+        if (!_serverPlayers.TryGetValue(peerId, out ServerPlayer? player))
+        {
+            return;
+        }
+
+        player.EquippedItem = ItemId.None;
+        player.EquippedCharges = 0;
+        player.EquippedCooldownEndTick = 0;
+        if (IsServer)
+        {
+            BroadcastInventoryStateForPeer(peerId);
+        }
+    }
+
+    public void ServerClearAllEquippedItems()
+    {
+        foreach (KeyValuePair<int, ServerPlayer> pair in _serverPlayers)
+        {
+            int peerId = pair.Key;
+            ServerPlayer player = pair.Value;
+            player.EquippedItem = ItemId.None;
+            player.EquippedCharges = 0;
+            player.EquippedCooldownEndTick = 0;
+            if (IsServer)
+            {
+                BroadcastInventoryStateForPeer(peerId);
+            }
+        }
+    }
+
+    public bool ServerTryConsumePickup(int peerId, int pickupId)
+    {
+        if (!IsServer)
+        {
+            return false;
+        }
+
+        if (ServerCanPickupItem is not null && !ServerCanPickupItem(peerId))
+        {
+            return false;
+        }
+
+        if (!_pickups.TryGetValue(pickupId, out PickupItem? pickup))
+        {
+            return false;
+        }
+
+        if (_inactivePickups.Contains(pickupId))
+        {
+            return false;
+        }
+
+        if (!ServerTryEquipItem(peerId, pickup.ItemId, pickup.Charges))
+        {
+            return false;
+        }
+
+        _inactivePickups.Add(pickupId);
+        pickup.SetActive(false);
+        BroadcastPickupState(pickupId, active: false);
+        return true;
+    }
+
+    public void ServerResetAllPickups()
+    {
+        if (!IsServer)
+        {
+            return;
+        }
+
+        _inactivePickups.Clear();
+        foreach (KeyValuePair<int, PickupItem> pair in _pickups)
+        {
+            int pickupId = pair.Key;
+            PickupItem pickup = pair.Value;
+            pickup.SetActive(true);
+            BroadcastPickupState(pickupId, active: true);
+        }
+    }
+
+    public bool IsFrozen(int peerId, uint tick)
+    {
+        return _freezeUntilTickByPeer.TryGetValue(peerId, out uint freezeUntilTick) && tick < freezeUntilTick;
+    }
+
+    public void ServerApplyFreeze(int targetPeerId, float durationSec)
+    {
+        if (!IsServer)
+        {
+            return;
+        }
+
+        if (!_serverPlayers.TryGetValue(targetPeerId, out ServerPlayer? targetPlayer))
+        {
+            return;
+        }
+
+        int durationTicks = Mathf.CeilToInt(Mathf.Max(0.0f, durationSec) * Mathf.Max(1, TickRate));
+        uint frozenUntilTick = _server_sim_tick + (uint)Mathf.Max(0, durationTicks);
+        _freezeUntilTickByPeer[targetPeerId] = frozenUntilTick;
+
+        PlayerCharacter targetChar = targetPlayer.Character;
+        targetChar.Velocity = Vector3.Zero;
+        targetChar.ResetLocomotionFromAuthoritative(targetChar.Grounded);
+        BroadcastFreezeStateForPeer(targetPeerId, frozenUntilTick);
+
+        if (targetPeerId == _localPeerId)
+        {
+            uint nowTick = IsServer ? _server_sim_tick : GetEstimatedServerTickNow();
+            bool frozenNow = IsFrozen(targetPeerId, nowTick);
+            if (frozenNow && !_localFreezeActive)
+            {
+                _frozenYaw = _lookYaw;
+                _frozenPitch = _lookPitch;
+                _localFreezeActive = true;
+            }
+        }
     }
 
     public void SetDebugLogging(bool logControlPackets)
@@ -336,6 +523,7 @@ public partial class NetSession : Node
     }
     public override void _Ready()
     {
+        AddToGroup("net_session");
         // Godot polls MultiplayerAPI during process_frame by default; we poll manually in physics for fixed-step netcode.
         GetTree().SetMultiplayerPollEnabled(false);
         Multiplayer.PeerConnected += OnPeerConnected;
@@ -425,7 +613,7 @@ public partial class NetSession : Node
 
     public override void _Input(InputEvent @event)
     {
-        if (_localCharacter is null || !_hasFocus)
+        if (_localCharacter is null || !_hasFocus || IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
         {
             return;
         }
@@ -616,6 +804,11 @@ public partial class NetSession : Node
         _serverPlayers.Clear();
         _serverCharactersByPeer.Clear();
         _remotePlayers.Clear();
+        _clientInventory.Clear();
+        _pickups.Clear();
+        _inactivePickups.Clear();
+        _freezeUntilTickByPeer.Clear();
+        _localFreezeActive = false;
         _localCharacter?.QueueFree();
         _localCharacter = null;
         _localPeerId = 0;
@@ -641,5 +834,28 @@ public partial class NetSession : Node
             Multiplayer.MultiplayerPeer = null;
         }
         Input.MouseMode = Input.MouseModeEnum.Visible;
+    }
+
+    private bool IsLocalFrozenAtTick(uint tick)
+    {
+        if (!IsClient || _localPeerId <= 0)
+        {
+            _localFreezeActive = false;
+            return false;
+        }
+
+        bool frozen = IsFrozen(_localPeerId, tick);
+        if (frozen && !_localFreezeActive)
+        {
+            _frozenYaw = _lookYaw;
+            _frozenPitch = _lookPitch;
+            _localFreezeActive = true;
+        }
+        else if (!frozen)
+        {
+            _localFreezeActive = false;
+        }
+
+        return frozen;
     }
 }

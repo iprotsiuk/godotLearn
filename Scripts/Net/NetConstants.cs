@@ -12,7 +12,7 @@ public static class NetChannels
 
 public static class NetConstants
 {
-    public const uint ProtocolVersion = 11;
+    public const uint ProtocolVersion = 14;
     public const int MaxPlayers = 16;
     public const int MaxInputRedundancy = 5;
 
@@ -64,5 +64,8 @@ public enum ControlType : byte
     MatchConfig = 7,
     MatchState = 8,
     TagStateFull = 9,
-    TagStateDelta = 10
+    TagStateDelta = 10,
+    InventoryState = 11,
+    PickupState = 12,
+    FreezeState = 13
 }

@@ -50,7 +50,7 @@ public partial class NetSession
     private void CaptureInputState()
     {
         ProcessDeferredFocusOutReset();
-        if (!_hasFocus)
+        if (!_hasFocus || IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
         {
             _inputState.MoveAxes = Vector2.Zero;
             _inputState.JumpHeld = false;
@@ -65,7 +65,7 @@ public partial class NetSession
 
     private void TryLatchGroundedJump()
     {
-        if (_localCharacter is null)
+        if (_localCharacter is null || IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
         {
             return;
         }
@@ -84,6 +84,11 @@ public partial class NetSession
 
     private void TryLatchFirePressed()
     {
+        if (IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
+        {
+            return;
+        }
+
         _firePressRepeatTicksRemaining = Mathf.Clamp(1, 1, NetConstants.MaxInputRedundancy);
         RecordLocalFirePressDiag(_client_send_tick);
         TrySpawnPredictedLocalFireVisual();
@@ -91,6 +96,11 @@ public partial class NetSession
 
     private void TryLatchInteractPressed()
     {
+        if (IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
+        {
+            return;
+        }
+
         _interactPressRepeatTicksRemaining = Mathf.Clamp(1, 1, NetConstants.MaxInputRedundancy);
     }
 

@@ -137,6 +137,35 @@ public static partial class NetCodec
         WriteUInt(packet, 6, itCooldownEndTick);
     }
 
+    public static void WriteControlInventoryState(byte[] packet, int peerId, byte itemId, byte charges, uint cooldownEndTick)
+    {
+        System.Array.Clear(packet, 0, NetConstants.ControlPacketBytes);
+        packet[0] = (byte)PacketType.Control;
+        packet[1] = (byte)ControlType.InventoryState;
+        WriteInt(packet, 2, peerId);
+        packet[6] = itemId;
+        packet[7] = charges;
+        WriteUInt(packet, 8, cooldownEndTick);
+    }
+
+    public static void WriteControlPickupState(byte[] packet, int pickupId, bool isActive)
+    {
+        System.Array.Clear(packet, 0, NetConstants.ControlPacketBytes);
+        packet[0] = (byte)PacketType.Control;
+        packet[1] = (byte)ControlType.PickupState;
+        WriteInt(packet, 2, pickupId);
+        packet[6] = isActive ? (byte)1 : (byte)0;
+    }
+
+    public static void WriteControlFreezeState(byte[] packet, int targetPeerId, uint frozenUntilTick)
+    {
+        System.Array.Clear(packet, 0, NetConstants.ControlPacketBytes);
+        packet[0] = (byte)PacketType.Control;
+        packet[1] = (byte)ControlType.FreezeState;
+        WriteInt(packet, 2, targetPeerId);
+        WriteUInt(packet, 6, frozenUntilTick);
+    }
+
     public static bool TryReadControl(ReadOnlySpan<byte> packet, out ControlType type)
     {
         type = 0;
@@ -241,4 +270,20 @@ public static partial class NetCodec
     public static int ReadControlTagStateDeltaItPeer(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
 
     public static uint ReadControlTagStateDeltaCooldownEndTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 6);
+
+    public static int ReadControlInventoryPeerId(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
+
+    public static byte ReadControlInventoryItemId(ReadOnlySpan<byte> packet) => packet[6];
+
+    public static byte ReadControlInventoryCharges(ReadOnlySpan<byte> packet) => packet[7];
+
+    public static uint ReadControlInventoryCooldownEndTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 8);
+
+    public static int ReadControlPickupStatePickupId(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
+
+    public static bool ReadControlPickupStateIsActive(ReadOnlySpan<byte> packet) => packet[6] != 0;
+
+    public static int ReadControlFreezeStateTargetPeerId(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
+
+    public static uint ReadControlFreezeStateFrozenUntilTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 6);
 }

@@ -1,6 +1,7 @@
 // Scripts/Net/NetSession.Weapon.cs
 using System.Collections.Generic;
 using Godot;
+using NetRunnerSlice.Items;
 using NetRunnerSlice.Player;
 
 namespace NetRunnerSlice.Net;
@@ -52,6 +53,32 @@ public partial class NetSession
 		if ((command.Buttons & InputButtons.FirePressed) == 0)
 		{
 			return;
+		}
+
+		bool isFreezeGun = shooter.EquippedItem == ItemId.FreezeGun;
+		if (isFreezeGun)
+		{
+			if (shooter.EquippedCharges == 0)
+			{
+				ServerClearEquippedItem(shooterPeerId);
+				return;
+			}
+
+			if (command.InputTick < shooter.EquippedCooldownEndTick)
+			{
+				return;
+			}
+
+			shooter.EquippedCooldownEndTick = command.InputTick + (uint)(3 * TickRate);
+			shooter.EquippedCharges--;
+			if (shooter.EquippedCharges == 0)
+			{
+				ServerClearEquippedItem(shooterPeerId);
+			}
+			else
+			{
+				BroadcastInventoryStateForPeer(shooterPeerId);
+			}
 		}
 
 		uint fireTick = command.InputTick;
@@ -123,7 +150,14 @@ public partial class NetSession
 		};
 		if (hitPeer >= 0)
 		{
-			ApplyWeaponDamage(hitPeer, WeaponHitDamage);
+			if (isFreezeGun)
+			{
+				ServerApplyFreeze(hitPeer, 1.0f);
+			}
+			else
+			{
+				ApplyWeaponDamage(hitPeer, WeaponHitDamage);
+			}
 			GD.Print($"ServerHit: shooter={shooterPeerId} target={hitPeer} fireTick={fireTick} targetTick={targetTick}");
 		}
 		else

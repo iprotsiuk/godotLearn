@@ -353,6 +353,16 @@ public partial class NetSession
                 player.NextResyncHintAtSec = nowSec + 0.5;
             }
 
+            if (IsFrozen(peerId, command.InputTick))
+            {
+                InputCommand frozenNeutral = BuildNeutralInput(player.LastInput, command.InputTick, fixedDt, player.CurrentInputEpoch);
+                player.Character.Velocity = Vector3.Zero;
+                player.Character.ResetLocomotionFromAuthoritative(player.Character.Grounded);
+                ServerPostSimulatePlayer?.Invoke(peerId, player.Character, frozenNeutral, _server_sim_tick);
+                LogJoinDiagnosticsIfDue(peerId, player, nowSec);
+                continue;
+            }
+
             // Fire convention: evaluate at END of tick T, after applying view + movement for input tick T.
             player.Character.SetLook(command.Yaw, command.Pitch);
             PlayerMotor.Simulate(player.Character, command, _config);

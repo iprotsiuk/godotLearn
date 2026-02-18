@@ -220,8 +220,17 @@ public partial class NetSession
 
             if (allowPrediction && _localCharacter is not null)
             {
-                _localCharacter.SetLook(command.Yaw, command.Pitch);
-                PlayerMotor.Simulate(_localCharacter, command, _config);
+                if (IsLocalFrozenAtTick(command.InputTick))
+                {
+                    _localCharacter.SetLook(_frozenYaw, _frozenPitch);
+                    _localCharacter.Velocity = Vector3.Zero;
+                    _localCharacter.ResetLocomotionFromAuthoritative(_localCharacter.Grounded);
+                }
+                else
+                {
+                    _localCharacter.SetLook(command.Yaw, command.Pitch);
+                    PlayerMotor.Simulate(_localCharacter, command, _config);
+                }
             }
 
             _client_send_tick++;
@@ -265,17 +274,18 @@ public partial class NetSession
 
     private InputCommand BuildInputCommandForTick(uint sendTick)
     {
-        InputButtons buttons = ConsumeInputButtons();
+        bool frozen = IsLocalFrozenAtTick(sendTick);
+        InputButtons buttons = frozen ? InputButtons.None : ConsumeInputButtons();
         InputCommand command = new()
         {
             Seq = ++_nextInputSeq,
             InputTick = sendTick,
             InputEpoch = _inputEpoch,
             DtFixed = 1.0f / _config.ClientTickRate,
-            MoveAxes = _inputState.MoveAxes,
+            MoveAxes = frozen ? Vector2.Zero : _inputState.MoveAxes,
             Buttons = buttons,
-            Yaw = _lookYaw,
-            Pitch = _lookPitch
+            Yaw = frozen ? _frozenYaw : _lookYaw,
+            Pitch = frozen ? _frozenPitch : _lookPitch
         };
         InputSanitizer.SanitizeClient(ref command, _config);
         return command;

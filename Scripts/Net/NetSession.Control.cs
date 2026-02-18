@@ -1,6 +1,8 @@
 // Scripts/Net/NetSession.Control.cs
+using System.Collections.Generic;
 using Godot;
 using NetRunnerSlice.GameModes;
+using NetRunnerSlice.Items;
 
 namespace NetRunnerSlice.Net;
 
@@ -122,6 +124,9 @@ public partial class NetSession
                     SendMatchConfigToPeer(fromPeer);
                     SendMatchStateToPeer(fromPeer);
                     SendTagStateFullToPeer(fromPeer);
+                    SendAllInventoryStatesToPeer(fromPeer);
+                    SendAllPickupStatesToPeer(fromPeer);
+                    SendAllFreezeStatesToPeer(fromPeer);
                     break;
                 case ControlType.Ping:
                     ushort pingSeq = NetCodec.ReadControlPingSeq(packet);
@@ -324,6 +329,52 @@ public partial class NetSession
                     $"NetSession: TagStateDelta received itPeerId={deltaState.ItPeerId} cooldownEndTick={deltaState.ItCooldownEndTick}");
                 TagStateDeltaReceived?.Invoke(deltaState);
                 break;
+            case ControlType.InventoryState:
+                int peerId = NetCodec.ReadControlInventoryPeerId(packet);
+                byte itemId = NetCodec.ReadControlInventoryItemId(packet);
+                byte charges = NetCodec.ReadControlInventoryCharges(packet);
+                uint cooldownEndTick = NetCodec.ReadControlInventoryCooldownEndTick(packet);
+                _clientInventory[peerId] = (itemId, charges, cooldownEndTick);
+                InventoryStateReceived?.Invoke(peerId);
+                break;
+            case ControlType.PickupState:
+                int pickupId = NetCodec.ReadControlPickupStatePickupId(packet);
+                bool isActive = NetCodec.ReadControlPickupStateIsActive(packet);
+                if (isActive)
+                {
+                    _inactivePickups.Remove(pickupId);
+                }
+                else
+                {
+                    _inactivePickups.Add(pickupId);
+                }
+
+                if (_pickups.TryGetValue(pickupId, out PickupItem? pickup))
+                {
+                    pickup.SetActive(isActive);
+                }
+                break;
+            case ControlType.FreezeState:
+                int targetPeerId = NetCodec.ReadControlFreezeStateTargetPeerId(packet);
+                uint frozenUntilTick = NetCodec.ReadControlFreezeStateFrozenUntilTick(packet);
+                uint tickNow = _mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow();
+                bool wasFrozen = IsFrozen(targetPeerId, tickNow);
+                _freezeUntilTickByPeer[targetPeerId] = frozenUntilTick;
+                if (targetPeerId == _localPeerId)
+                {
+                    bool frozenNow = IsFrozen(targetPeerId, tickNow);
+                    if (frozenNow && !wasFrozen)
+                    {
+                        _frozenYaw = _lookYaw;
+                        _frozenPitch = _lookPitch;
+                        _localFreezeActive = true;
+                    }
+                    else if (!frozenNow)
+                    {
+                        _localFreezeActive = false;
+                    }
+                }
+                break;
         }
     }
 
@@ -391,6 +442,56 @@ public partial class NetSession
         SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
     }
 
+    private void SendInventoryStateToPeer(int targetPeerId, int inventoryPeerId, byte itemId, byte charges, uint cooldownEndTick)
+    {
+        NetCodec.WriteControlInventoryState(_controlPacket, inventoryPeerId, itemId, charges, cooldownEndTick);
+        SendPacket(targetPeerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+    }
+
+    private void SendAllInventoryStatesToPeer(int targetPeerId)
+    {
+        foreach (KeyValuePair<int, ServerPlayer> pair in _serverPlayers)
+        {
+            int inventoryPeerId = pair.Key;
+            ServerPlayer inventoryPlayer = pair.Value;
+            SendInventoryStateToPeer(
+                targetPeerId,
+                inventoryPeerId,
+                (byte)inventoryPlayer.EquippedItem,
+                inventoryPlayer.EquippedCharges,
+                inventoryPlayer.EquippedCooldownEndTick);
+        }
+    }
+
+    private void SendPickupStateToPeer(int targetPeerId, int pickupId, bool active)
+    {
+        NetCodec.WriteControlPickupState(_controlPacket, pickupId, active);
+        SendPacket(targetPeerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+    }
+
+    private void SendAllPickupStatesToPeer(int targetPeerId)
+    {
+        foreach (int pickupId in _pickups.Keys)
+        {
+            bool active = !_inactivePickups.Contains(pickupId);
+            SendPickupStateToPeer(targetPeerId, pickupId, active);
+        }
+    }
+
+    private void SendFreezeStateToPeer(int targetPeerId, int freezePeerId, uint frozenUntilTick)
+    {
+        NetCodec.WriteControlFreezeState(_controlPacket, freezePeerId, frozenUntilTick);
+        SendPacket(targetPeerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+    }
+
+    private void SendAllFreezeStatesToPeer(int targetPeerId)
+    {
+        foreach (KeyValuePair<int, uint> pair in _freezeUntilTickByPeer)
+        {
+            SendFreezeStateToPeer(targetPeerId, pair.Key, pair.Value);
+        }
+    }
+
     private void BroadcastMatchStateToConnectedPeers()
     {
         foreach (int peerId in _serverPlayers.Keys)
@@ -427,6 +528,65 @@ public partial class NetSession
             }
 
             SendTagStateDeltaToPeer(peerId);
+        }
+    }
+
+    private void BroadcastInventoryStateForPeer(int inventoryPeerId)
+    {
+        if (!IsServer || !_serverPlayers.TryGetValue(inventoryPeerId, out ServerPlayer? inventoryPlayer))
+        {
+            return;
+        }
+
+        foreach (int peerId in _serverPlayers.Keys)
+        {
+            if (_mode == RunMode.ListenServer && peerId == _localPeerId)
+            {
+                continue;
+            }
+
+            SendInventoryStateToPeer(
+                peerId,
+                inventoryPeerId,
+                (byte)inventoryPlayer.EquippedItem,
+                inventoryPlayer.EquippedCharges,
+                inventoryPlayer.EquippedCooldownEndTick);
+        }
+    }
+
+    private void BroadcastPickupState(int pickupId, bool active)
+    {
+        if (!IsServer)
+        {
+            return;
+        }
+
+        foreach (int peerId in _serverPlayers.Keys)
+        {
+            if (_mode == RunMode.ListenServer && peerId == _localPeerId)
+            {
+                continue;
+            }
+
+            SendPickupStateToPeer(peerId, pickupId, active);
+        }
+    }
+
+    private void BroadcastFreezeStateForPeer(int freezePeerId, uint frozenUntilTick)
+    {
+        if (!IsServer)
+        {
+            return;
+        }
+
+        foreach (int peerId in _serverPlayers.Keys)
+        {
+            if (_mode == RunMode.ListenServer && peerId == _localPeerId)
+            {
+                continue;
+            }
+
+            SendFreezeStateToPeer(peerId, freezePeerId, frozenUntilTick);
         }
     }
 
