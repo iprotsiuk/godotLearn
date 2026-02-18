@@ -97,23 +97,37 @@ public partial class NetSession
     {
         if (IsServer)
         {
-            ServerPeerConnected((int)id);
+            int peerId = (int)id;
+            bool alreadyKnown = _serverPlayers.ContainsKey(peerId);
+            ServerPeerConnected(peerId);
+            if (!alreadyKnown)
+            {
+                ServerPeerJoined?.Invoke(peerId);
+            }
         }
     }
 
     private void OnPeerDisconnected(long id)
     {
         int peerId = (int)id;
+        bool removedServerPeer = false;
         if (_serverPlayers.TryGetValue(peerId, out ServerPlayer? serverPlayer))
         {
             serverPlayer.Character.QueueFree();
             _serverPlayers.Remove(peerId);
+            _serverCharactersByPeer.Remove(peerId);
+            removedServerPeer = true;
         }
 
         if (_remotePlayers.TryGetValue(peerId, out RemoteEntity? remotePlayer))
         {
             remotePlayer.Character.QueueFree();
             _remotePlayers.Remove(peerId);
+        }
+
+        if (removedServerPeer)
+        {
+            ServerPeerLeft?.Invoke(peerId);
         }
     }
 
@@ -186,6 +200,7 @@ public partial class NetSession
             JoinDiagUntilSec = (Time.GetTicksMsec() / 1000.0) + 3.0,
             NextJoinDiagAtSec = Time.GetTicksMsec() / 1000.0
         };
+        _serverCharactersByPeer[peerId] = character;
     }
 
     private Vector3 SpawnPointForPeer(int peerId)

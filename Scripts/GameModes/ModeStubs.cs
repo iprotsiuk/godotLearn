@@ -1,4 +1,8 @@
 // Scripts/GameModes/ModeStubs.cs
+using NetRunnerSlice.Match;
+using NetRunnerSlice.Net;
+using NetRunnerSlice.Player;
+
 namespace NetRunnerSlice.GameModes;
 
 public sealed class RaceModeStub : IGameMode
@@ -13,6 +17,28 @@ public sealed class RaceModeStub : IGameMode
     public void Exit()
     {
     }
+
+    public void ServerOnRoundStart(MatchManager matchManager, NetSession session)
+    {
+    }
+
+    public void ServerOnRoundEnd(MatchManager matchManager, NetSession session)
+    {
+    }
+
+    public void ServerOnPostSimulatePlayer(
+        MatchManager matchManager,
+        NetSession session,
+        int peerId,
+        PlayerCharacter serverCharacter,
+        InputCommand cmd,
+        uint tick)
+    {
+    }
+
+    public void ClientOnTagState(MatchManager matchManager, NetSession session, TagState state, bool isFull)
+    {
+    }
 }
 
 public sealed class TagModeStub : IGameMode
@@ -25,6 +51,28 @@ public sealed class TagModeStub : IGameMode
     }
 
     public void Exit()
+    {
+    }
+
+    public void ServerOnRoundStart(MatchManager matchManager, NetSession session)
+    {
+    }
+
+    public void ServerOnRoundEnd(MatchManager matchManager, NetSession session)
+    {
+    }
+
+    public void ServerOnPostSimulatePlayer(
+        MatchManager matchManager,
+        NetSession session,
+        int peerId,
+        PlayerCharacter serverCharacter,
+        InputCommand cmd,
+        uint tick)
+    {
+    }
+
+    public void ClientOnTagState(MatchManager matchManager, NetSession session, TagState state, bool isFull)
     {
     }
 }

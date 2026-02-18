@@ -24,6 +24,26 @@ layout_mode = 2
 placeholder_text = "Port"
 text = "7777"
 
+[node name="ModeLabel" type="Label" parent="."]
+layout_mode = 2
+text = "Mode"
+
+[node name="ModeOption" type="OptionButton" parent="."]
+layout_mode = 2
+
+[node name="RoundTimeLabel" type="Label" parent="."]
+layout_mode = 2
+text = "Round Time (sec)"
+
+[node name="RoundTimeSecSpin" type="SpinBox" parent="."]
+layout_mode = 2
+min_value = 30.0
+max_value = 900.0
+step = 10.0
+value = 120.0
+allow_greater = false
+allow_lesser = false
+
 [node name="HostButton" type="Button" parent="."]
 layout_mode = 2
 text = "Host"

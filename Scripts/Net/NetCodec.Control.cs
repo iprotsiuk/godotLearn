@@ -99,6 +99,44 @@ public static partial class NetCodec
         WriteUInt(packet, 2, serverTick);
     }
 
+    public static void WriteControlMatchConfig(byte[] packet, MatchConfig config)
+    {
+        System.Array.Clear(packet, 0, NetConstants.ControlPacketBytes);
+        packet[0] = (byte)PacketType.Control;
+        packet[1] = (byte)ControlType.MatchConfig;
+        WriteInt(packet, 2, (int)config.ModeId);
+        WriteInt(packet, 6, config.RoundTimeSec);
+    }
+
+    public static void WriteControlMatchState(byte[] packet, MatchState state)
+    {
+        System.Array.Clear(packet, 0, NetConstants.ControlPacketBytes);
+        packet[0] = (byte)PacketType.Control;
+        packet[1] = (byte)ControlType.MatchState;
+        WriteInt(packet, 2, state.RoundIndex);
+        packet[6] = (byte)state.Phase;
+        WriteUInt(packet, 7, state.PhaseEndTick);
+    }
+
+    public static void WriteControlTagStateFull(byte[] packet, TagState state)
+    {
+        System.Array.Clear(packet, 0, NetConstants.ControlPacketBytes);
+        packet[0] = (byte)PacketType.Control;
+        packet[1] = (byte)ControlType.TagStateFull;
+        WriteInt(packet, 2, state.RoundIndex);
+        WriteInt(packet, 6, state.ItPeerId);
+        WriteUInt(packet, 10, state.ItCooldownEndTick);
+    }
+
+    public static void WriteControlTagStateDelta(byte[] packet, int itPeerId, uint itCooldownEndTick)
+    {
+        System.Array.Clear(packet, 0, NetConstants.ControlPacketBytes);
+        packet[0] = (byte)PacketType.Control;
+        packet[1] = (byte)ControlType.TagStateDelta;
+        WriteInt(packet, 2, itPeerId);
+        WriteUInt(packet, 6, itCooldownEndTick);
+    }
+
     public static bool TryReadControl(ReadOnlySpan<byte> packet, out ControlType type)
     {
         type = 0;
@@ -170,4 +208,37 @@ public static partial class NetCodec
     public static int ReadControlDelayTicks(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
 
     public static uint ReadControlResyncHintTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 2);
+
+    public static MatchConfig ReadControlMatchConfig(ReadOnlySpan<byte> packet)
+    {
+        return new MatchConfig
+        {
+            ModeId = (GameModes.GameModeId)ReadInt(packet, 2),
+            RoundTimeSec = ReadInt(packet, 6)
+        };
+    }
+
+    public static MatchState ReadControlMatchState(ReadOnlySpan<byte> packet)
+    {
+        return new MatchState
+        {
+            RoundIndex = ReadInt(packet, 2),
+            Phase = (MatchPhase)packet[6],
+            PhaseEndTick = ReadUInt(packet, 7)
+        };
+    }
+
+    public static TagState ReadControlTagStateFull(ReadOnlySpan<byte> packet)
+    {
+        return new TagState
+        {
+            RoundIndex = ReadInt(packet, 2),
+            ItPeerId = ReadInt(packet, 6),
+            ItCooldownEndTick = ReadUInt(packet, 10)
+        };
+    }
+
+    public static int ReadControlTagStateDeltaItPeer(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
+
+    public static uint ReadControlTagStateDeltaCooldownEndTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 6);
 }

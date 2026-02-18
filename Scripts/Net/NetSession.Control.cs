@@ -1,5 +1,6 @@
 // Scripts/Net/NetSession.Control.cs
 using Godot;
+using NetRunnerSlice.GameModes;
 
 namespace NetRunnerSlice.Net;
 
@@ -13,6 +14,52 @@ public partial class NetSession
     private const float ServerRttOutlierJitterScale = 4.0f;
     private const int ServerRttOutlierConsecutiveRequired = 3;
     private readonly System.Collections.Generic.Dictionary<int, int> _serverRttOutlierStreak = new();
+
+    public void SetCurrentMatchState(MatchState state, bool broadcast = true)
+    {
+        MatchState sanitized = SanitizeMatchState(state);
+        bool changed =
+            CurrentMatchState.RoundIndex != sanitized.RoundIndex ||
+            CurrentMatchState.Phase != sanitized.Phase ||
+            CurrentMatchState.PhaseEndTick != sanitized.PhaseEndTick;
+        CurrentMatchState = sanitized;
+        if (broadcast && changed && IsServer)
+        {
+            BroadcastMatchStateToConnectedPeers();
+        }
+    }
+
+    public void SetCurrentTagStateFull(TagState state, bool broadcast = true)
+    {
+        TagState sanitized = SanitizeTagState(state);
+        bool changed =
+            CurrentTagState.RoundIndex != sanitized.RoundIndex ||
+            CurrentTagState.ItPeerId != sanitized.ItPeerId ||
+            CurrentTagState.ItCooldownEndTick != sanitized.ItCooldownEndTick;
+        CurrentTagState = sanitized;
+        if (broadcast && changed && IsServer)
+        {
+            BroadcastTagStateFullToConnectedPeers();
+        }
+    }
+
+    public void SetCurrentTagStateDelta(int itPeerId, uint itCooldownEndTick, bool broadcast = true)
+    {
+        TagState sanitized = SanitizeTagState(new TagState
+        {
+            RoundIndex = CurrentTagState.RoundIndex,
+            ItPeerId = itPeerId,
+            ItCooldownEndTick = itCooldownEndTick
+        });
+        bool changed =
+            CurrentTagState.ItPeerId != sanitized.ItPeerId ||
+            CurrentTagState.ItCooldownEndTick != sanitized.ItCooldownEndTick;
+        CurrentTagState = sanitized;
+        if (broadcast && changed && IsServer)
+        {
+            BroadcastTagStateDeltaToConnectedPeers();
+        }
+    }
 
     private void HandleControl(int fromPeer, byte[] packet)
     {
@@ -35,6 +82,7 @@ public partial class NetSession
                     if (!_serverPlayers.ContainsKey(fromPeer))
                     {
                         ServerPeerConnected(fromPeer);
+                        ServerPeerJoined?.Invoke(fromPeer);
                     }
 
                     if (!_serverPlayers.TryGetValue(fromPeer, out ServerPlayer? serverPlayer))
@@ -71,6 +119,9 @@ public partial class NetSession
                         _config.WallJumpAwayVelocity);
                     SendPacket(fromPeer, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
                     GD.Print($"NetSession: Welcome sent to peer {fromPeer}");
+                    SendMatchConfigToPeer(fromPeer);
+                    SendMatchStateToPeer(fromPeer);
+                    SendTagStateFullToPeer(fromPeer);
                     break;
                 case ControlType.Ping:
                     ushort pingSeq = NetCodec.ReadControlPingSeq(packet);
@@ -241,6 +292,141 @@ public partial class NetSession
                 _lastServerTickObsAtSec = Time.GetTicksMsec() / 1000.0;
                 TriggerClientResync("server_resync_hint", hintServerTick);
                 break;
+            case ControlType.MatchConfig:
+                MatchConfig receivedConfig = SanitizeMatchConfig(NetCodec.ReadControlMatchConfig(packet));
+                CurrentMatchConfig = receivedConfig;
+                GD.Print($"NetSession: MatchConfig received mode={receivedConfig.ModeId} roundTimeSec={receivedConfig.RoundTimeSec}");
+                MatchConfigReceived?.Invoke(receivedConfig);
+                break;
+            case ControlType.MatchState:
+                MatchState receivedState = SanitizeMatchState(NetCodec.ReadControlMatchState(packet));
+                CurrentMatchState = receivedState;
+                GD.Print(
+                    $"NetSession: MatchState received roundIndex={receivedState.RoundIndex} phase={receivedState.Phase} phaseEndTick={receivedState.PhaseEndTick}");
+                MatchStateReceived?.Invoke(receivedState);
+                break;
+            case ControlType.TagStateFull:
+                TagState fullState = SanitizeTagState(NetCodec.ReadControlTagStateFull(packet));
+                CurrentTagState = fullState;
+                GD.Print(
+                    $"NetSession: TagStateFull received roundIndex={fullState.RoundIndex} itPeerId={fullState.ItPeerId} cooldownEndTick={fullState.ItCooldownEndTick}");
+                TagStateFullReceived?.Invoke(fullState);
+                break;
+            case ControlType.TagStateDelta:
+                TagState deltaState = SanitizeTagState(new TagState
+                {
+                    RoundIndex = CurrentTagState.RoundIndex,
+                    ItPeerId = NetCodec.ReadControlTagStateDeltaItPeer(packet),
+                    ItCooldownEndTick = NetCodec.ReadControlTagStateDeltaCooldownEndTick(packet)
+                });
+                CurrentTagState = deltaState;
+                GD.Print(
+                    $"NetSession: TagStateDelta received itPeerId={deltaState.ItPeerId} cooldownEndTick={deltaState.ItCooldownEndTick}");
+                TagStateDeltaReceived?.Invoke(deltaState);
+                break;
+        }
+    }
+
+    private static MatchConfig SanitizeMatchConfig(in MatchConfig config)
+    {
+        GameModeId modeId = System.Enum.IsDefined(typeof(GameModeId), config.ModeId)
+            ? config.ModeId
+            : GameModeId.FreeRun;
+        return new MatchConfig
+        {
+            ModeId = modeId,
+            RoundTimeSec = Mathf.Clamp(config.RoundTimeSec, 30, 900)
+        };
+    }
+
+    private static MatchState SanitizeMatchState(in MatchState state)
+    {
+        MatchPhase phase = System.Enum.IsDefined(typeof(MatchPhase), state.Phase)
+            ? state.Phase
+            : MatchPhase.Running;
+        return new MatchState
+        {
+            RoundIndex = Mathf.Max(0, state.RoundIndex),
+            Phase = phase,
+            PhaseEndTick = state.PhaseEndTick
+        };
+    }
+
+    private static TagState SanitizeTagState(in TagState state)
+    {
+        return new TagState
+        {
+            RoundIndex = Mathf.Max(0, state.RoundIndex),
+            ItPeerId = state.ItPeerId,
+            ItCooldownEndTick = state.ItCooldownEndTick
+        };
+    }
+
+    private void SendMatchConfigToPeer(int peerId)
+    {
+        MatchConfig sanitized = SanitizeMatchConfig(CurrentMatchConfig);
+        CurrentMatchConfig = sanitized;
+        NetCodec.WriteControlMatchConfig(_controlPacket, sanitized);
+        SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+    }
+
+    private void SendMatchStateToPeer(int peerId)
+    {
+        CurrentMatchState = SanitizeMatchState(CurrentMatchState);
+        NetCodec.WriteControlMatchState(_controlPacket, CurrentMatchState);
+        SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+    }
+
+    private void SendTagStateFullToPeer(int peerId)
+    {
+        CurrentTagState = SanitizeTagState(CurrentTagState);
+        NetCodec.WriteControlTagStateFull(_controlPacket, CurrentTagState);
+        SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+    }
+
+    private void SendTagStateDeltaToPeer(int peerId)
+    {
+        CurrentTagState = SanitizeTagState(CurrentTagState);
+        NetCodec.WriteControlTagStateDelta(_controlPacket, CurrentTagState.ItPeerId, CurrentTagState.ItCooldownEndTick);
+        SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+    }
+
+    private void BroadcastMatchStateToConnectedPeers()
+    {
+        foreach (int peerId in _serverPlayers.Keys)
+        {
+            if (_mode == RunMode.ListenServer && peerId == _localPeerId)
+            {
+                continue;
+            }
+
+            SendMatchStateToPeer(peerId);
+        }
+    }
+
+    private void BroadcastTagStateFullToConnectedPeers()
+    {
+        foreach (int peerId in _serverPlayers.Keys)
+        {
+            if (_mode == RunMode.ListenServer && peerId == _localPeerId)
+            {
+                continue;
+            }
+
+            SendTagStateFullToPeer(peerId);
+        }
+    }
+
+    private void BroadcastTagStateDeltaToConnectedPeers()
+    {
+        foreach (int peerId in _serverPlayers.Keys)
+        {
+            if (_mode == RunMode.ListenServer && peerId == _localPeerId)
+            {
+                continue;
+            }
+
+            SendTagStateDeltaToPeer(peerId);
         }
     }
 

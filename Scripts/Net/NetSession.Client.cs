@@ -311,6 +311,17 @@ public partial class NetSession
             buttons |= InputButtons.FirePressed;
         }
 
+        bool interactPressed = _interactPressRepeatTicksRemaining > 0;
+        if (_interactPressRepeatTicksRemaining > 0)
+        {
+            _interactPressRepeatTicksRemaining--;
+        }
+
+        if (interactPressed)
+        {
+            buttons |= InputButtons.InteractPressed;
+        }
+
         return buttons;
     }
 

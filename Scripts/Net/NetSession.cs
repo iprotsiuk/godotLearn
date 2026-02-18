@@ -1,6 +1,7 @@
 // Scripts/Net/NetSession.cs
 using System.Collections.Generic;
 using Godot;
+using NetRunnerSlice.GameModes;
 using NetRunnerSlice.Player;
 
 namespace NetRunnerSlice.Net;
@@ -85,6 +86,7 @@ public partial class NetSession : Node
     private readonly List<(Node3D Node, double ExpireAt)> _debugDrawNodes = new(32);
 
     private readonly Dictionary<int, ServerPlayer> _serverPlayers = new();
+    private readonly Dictionary<int, PlayerCharacter> _serverCharactersByPeer = new();
     private readonly Dictionary<int, RemoteEntity> _remotePlayers = new();
     private readonly byte[] _inputPacket = new byte[NetConstants.InputPacketBytes];
     private readonly byte[] _snapshotPacket = new byte[NetConstants.SnapshotPacketBytes];
@@ -188,7 +190,97 @@ public partial class NetSession : Node
     private PlayerCharacter? _localCharacter;
     public bool IsServer => _mode == RunMode.ListenServer || _mode == RunMode.DedicatedServer;
     public bool IsClient => _mode == RunMode.ListenServer || _mode == RunMode.Client;
+    public int TickRate => Mathf.Max(1, _config.ServerTickRate);
     public SessionMetrics Metrics { get; private set; }
+    public MatchConfig CurrentMatchConfig { get; set; } = new()
+    {
+        ModeId = GameModeId.FreeRun,
+        RoundTimeSec = 120
+    };
+    public MatchState CurrentMatchState { get; private set; } = new()
+    {
+        RoundIndex = 0,
+        Phase = MatchPhase.Running,
+        PhaseEndTick = 0
+    };
+    public TagState CurrentTagState { get; private set; } = new()
+    {
+        RoundIndex = 0,
+        ItPeerId = -1,
+        ItCooldownEndTick = 0
+    };
+    public int LocalPeerId => _localPeerId;
+    public event System.Action<MatchConfig>? MatchConfigReceived;
+    public event System.Action<MatchState>? MatchStateReceived;
+    public event System.Action<TagState>? TagStateFullReceived;
+    public event System.Action<TagState>? TagStateDeltaReceived;
+    public event System.Action<int>? ServerPeerJoined;
+    public event System.Action<int>? ServerPeerLeft;
+    public event System.Action<int, PlayerCharacter, InputCommand, uint>? ServerPostSimulatePlayer;
+    /// <summary>
+    /// Authoritative server-side characters only. Listen-server has duplicate bodies;
+    /// do not use scene scanning for gameplay rules.
+    /// </summary>
+    public IReadOnlyDictionary<int, PlayerCharacter> ServerPlayers => _serverCharactersByPeer;
+
+    public int[] GetServerPeerIds()
+    {
+        int[] peers = new int[_serverPlayers.Count];
+        int index = 0;
+        foreach (int peerId in _serverPlayers.Keys)
+        {
+            peers[index++] = peerId;
+        }
+
+        return peers;
+    }
+
+    /// <summary>
+    /// Returns the authoritative server-side character for a peer. Listen-server has duplicate bodies;
+    /// do not use scene scanning for gameplay rules.
+    /// </summary>
+    public PlayerCharacter? GetServerCharacter(int peerId)
+    {
+        if (!IsServer)
+        {
+            return null;
+        }
+
+        return _serverCharactersByPeer.GetValueOrDefault(peerId);
+    }
+
+    public bool TryGetServerCharacter(int peerId, out PlayerCharacter character)
+    {
+        character = null!;
+        if (!IsServer)
+        {
+            return false;
+        }
+
+        if (_serverCharactersByPeer.TryGetValue(peerId, out PlayerCharacter? found))
+        {
+            character = found;
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool RespawnServerPeerAtSpawn(int peerId)
+    {
+        if (!_serverPlayers.TryGetValue(peerId, out ServerPlayer? player))
+        {
+            return false;
+        }
+
+        PlayerCharacter character = player.Character;
+        character.GlobalPosition = SpawnPointForPeer(peerId);
+        character.Velocity = Vector3.Zero;
+        character.SetLook(SpawnYawForPeer(), 0.0f);
+        character.ResetLocomotionFromAuthoritative(grounded: false);
+        character.ResetInterpolationAfterSnap();
+        return true;
+    }
 
     public void SetDebugLogging(bool logControlPackets)
     {
@@ -315,6 +407,10 @@ public partial class NetSession : Node
         if (@event.IsActionPressed("fire"))
         {
             TryLatchFirePressed();
+        }
+        if (@event.IsActionPressed("interact"))
+        {
+            TryLatchInteractPressed();
         }
 
         if (@event.IsActionPressed("quit"))
@@ -518,11 +614,24 @@ public partial class NetSession : Node
             remote.Character.QueueFree();
         }
         _serverPlayers.Clear();
+        _serverCharactersByPeer.Clear();
         _remotePlayers.Clear();
         _localCharacter?.QueueFree();
         _localCharacter = null;
         _localPeerId = 0;
         _welcomeReceived = false;
+        CurrentMatchState = new MatchState
+        {
+            RoundIndex = 0,
+            Phase = MatchPhase.Running,
+            PhaseEndTick = 0
+        };
+        CurrentTagState = new TagState
+        {
+            RoundIndex = 0,
+            ItPeerId = -1,
+            ItCooldownEndTick = 0
+        };
         _simulator = null;
         _pingSent.Clear();
 

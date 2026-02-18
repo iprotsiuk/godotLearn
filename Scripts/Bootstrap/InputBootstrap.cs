@@ -12,6 +12,7 @@ public static class InputBootstrap
         EnsureKeyAction("move_left", Key.A);
         EnsureKeyAction("move_right", Key.D);
         EnsureKeyAction("jump", Key.Space);
+        EnsureKeyAction("interact", Key.E);
         EnsureKeyAction("quit", Key.Escape);
         EnsureKeyAction("toggle_debug", Key.F1);
         EnsureMouseAction("fire", MouseButton.Left);

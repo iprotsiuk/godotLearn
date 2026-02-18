@@ -2,6 +2,7 @@
 using Godot;
 using NetRunnerSlice.Debug;
 using NetRunnerSlice.GameModes;
+using NetRunnerSlice.Match;
 using NetRunnerSlice.Net;
 using NetRunnerSlice.UI;
 using NetRunnerSlice.UI.Hud;
@@ -12,7 +13,7 @@ public partial class Main : Node
     private const string MainMenuScenePath = "res://Scenes/UI/MainMenu.tscn";
     private const string HudScenePath = "res://Scenes/UI/Hud/Hud.tscn";
     private const string TestWorldScenePath = "res://Scenes/testWorld.tscn";
-    private readonly IGameMode _gameMode = new FreeRunMode();
+    private readonly MatchManager _matchManager = new();
     private CliArgs? _cli;
     private NetworkConfig? _config;
     private NetSession? _session;
@@ -51,11 +52,10 @@ public partial class Main : Node
         EnsureSceneRoot();
         EnsureSession();
         HookMultiplayerSignals();
-        _gameMode.Enter();
         switch (_cli.Role)
         {
             case StartupRole.Host:
-                StartHost(_cli.Port);
+                StartHost(_cli.Port, _menuSettings.SelectedMode, _menuSettings.RoundTimeSec);
                 break;
             case StartupRole.Join:
                 StartJoin(_cli.Ip, _cli.Port);
@@ -79,6 +79,7 @@ public partial class Main : Node
         }
 
         SessionMetrics metrics = _session.Metrics;
+        _matchManager.Tick(metrics);
         _overlay?.Update(metrics, _session.IsServer, _session.IsClient);
         _hud?.SetHealth(metrics.LocalHealth, metrics.LocalHealthMax);
     }
@@ -108,8 +109,8 @@ public partial class Main : Node
     public override void _ExitTree()
     {
         UnhookMultiplayerSignals();
+        _matchManager.DetachSession();
         _session?.StopSession();
-        _gameMode.Exit();
     }
     private void HookMultiplayerSignals()
     {
@@ -134,6 +135,7 @@ public partial class Main : Node
             Name = "NetSession"
         };
         AddChild(_session);
+        _matchManager.AttachSession(_session);
         _session.SetDebugLogging(_cli?.LogControlPackets ?? false);
         ApplySimFromCliAndConfig();
     }
@@ -166,13 +168,20 @@ public partial class Main : Node
         _hud.Name = "Hud";
         _hud.Hide();
         _uiRoot.AddChild(_hud);
+        _matchManager.SetHud(_hud);
 
         _menu = menuScene.Instantiate<MainMenu>();
         _menu.Name = "MainMenu";
         _uiRoot.AddChild(_menu);
         _overlay = new DebugOverlay { Name = "DebugOverlay" };
         _uiRoot.AddChild(_overlay);
-        _menu.HostRequested += StartHost;
+        _menu.HostRequested += (port, selectedModeId, roundTimeSec) =>
+        {
+            GameModeId selectedMode = Enum.IsDefined(typeof(GameModeId), selectedModeId)
+                ? (GameModeId)selectedModeId
+                : GameModeId.FreeRun;
+            StartHost(port, selectedMode, roundTimeSec);
+        };
         _menu.JoinRequested += StartJoin;
         _menu.QuitRequested += OnQuit;
         _menu.SettingsApplied += OnSettingsApplied;
@@ -283,8 +292,31 @@ public partial class Main : Node
         ApplySimFromCliAndConfig();
         return true;
     }
-    private void StartHost(int port)
+    private void StartHost(int port, GameModeId selectedMode, int roundTimeSec)
     {
+        _matchManager.ResetServerAuthorityState();
+        _menuSettings.SelectedMode = Enum.IsDefined(typeof(GameModeId), selectedMode)
+            ? selectedMode
+            : GameModeId.FreeRun;
+        _menuSettings.RoundTimeSec = Mathf.Clamp(roundTimeSec, 30, 900);
+        MenuSettingsStore.Save(_menuSettings);
+        GD.Print($"Host config: mode={_menuSettings.SelectedMode}, roundTimeSec={_menuSettings.RoundTimeSec}");
+
+        _session?.SetCurrentMatchState(new MatchState
+        {
+            RoundIndex = 0,
+            Phase = MatchPhase.Running,
+            PhaseEndTick = 0
+        }, broadcast: false);
+        if (_session is not null)
+        {
+            _session.CurrentMatchConfig = new MatchConfig
+            {
+                ModeId = _menuSettings.SelectedMode,
+                RoundTimeSec = _menuSettings.RoundTimeSec
+            };
+        }
+
         _joinPending = false;
         _session?.StopSession();
         UnloadWorld();
@@ -306,6 +338,7 @@ public partial class Main : Node
     }
     private void StartDedicated(int port)
     {
+        _matchManager.ResetServerAuthorityState();
         _joinPending = false;
         _session?.StopSession();
         UnloadWorld();
@@ -325,6 +358,7 @@ public partial class Main : Node
     }
     private void StartJoin(string ip, int port)
     {
+        _matchManager.ResetServerAuthorityState();
         _pendingJoinIp = ip;
         _pendingJoinPort = port;
         _joinPending = true;

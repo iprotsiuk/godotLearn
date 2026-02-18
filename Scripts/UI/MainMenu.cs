@@ -1,4 +1,5 @@
 using Godot;
+using NetRunnerSlice.GameModes;
 using NetRunnerSlice.UI.Menu;
 
 namespace NetRunnerSlice.UI;
@@ -9,7 +10,7 @@ public partial class MainMenu : Control
 	private const string SettingsScreenScenePath = "res://Scenes/UI/Menu/MainMenuSettingsScreen.tscn";
 
 	[Signal]
-	public delegate void HostRequestedEventHandler(int port);
+	public delegate void HostRequestedEventHandler(int port, int selectedModeId, int roundTimeSec);
 
 	[Signal]
 	public delegate void JoinRequestedEventHandler(string ip, int port);
@@ -51,6 +52,7 @@ public partial class MainMenu : Control
 	{
 		_settings = settings.Clone();
 		_settingsScreen?.SetSettings(_settings);
+		_mainScreen?.SetHostSettings(_settings.SelectedMode, _settings.RoundTimeSec);
 	}
 
 	public void OpenMainScreen()
@@ -74,7 +76,15 @@ public partial class MainMenu : Control
 		_mainScreen.SetDefaults(_defaultIp, _defaultPort);
 		_mainScreen.SetStatus(_status);
 
-		_mainScreen.HostPressed += port => EmitSignal(SignalName.HostRequested, port);
+		_mainScreen.SetHostSettings(_settings.SelectedMode, _settings.RoundTimeSec);
+		_mainScreen.HostPressed += (port, selectedModeId, roundTimeSec) =>
+		{
+			_settings.SelectedMode = Enum.IsDefined(typeof(GameModeId), selectedModeId)
+				? (GameModeId)selectedModeId
+				: GameModeId.FreeRun;
+			_settings.RoundTimeSec = Mathf.Clamp(roundTimeSec, 30, 900);
+			EmitSignal(SignalName.HostRequested, port, selectedModeId, roundTimeSec);
+		};
 		_mainScreen.JoinPressed += (ip, port) => EmitSignal(SignalName.JoinRequested, ip, port);
 		_mainScreen.SettingsPressed += ShowSettingsScreen;
 		_mainScreen.QuitPressed += () => EmitSignal(SignalName.QuitRequested);

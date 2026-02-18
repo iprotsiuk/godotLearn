@@ -339,6 +339,11 @@ public partial class NetSession
                 command.DtFixed = fixedDt;
             }
 
+            if ((command.Buttons & InputButtons.InteractPressed) != 0)
+            {
+                GD.Print($"ServerInteract: peer={peerId} tick={command.InputTick}");
+            }
+
             if (player.MissingInputStreakCurrent > NetConstants.MaxMissingBeforeResyncHint &&
                 nowSec >= player.NextResyncHintAtSec &&
                 !(_mode == RunMode.ListenServer && peerId == _localPeerId))
@@ -352,6 +357,7 @@ public partial class NetSession
             player.Character.SetLook(command.Yaw, command.Pitch);
             PlayerMotor.Simulate(player.Character, command, _config);
             ProcessFireFromInputCommand(peerId, player, command);
+            ServerPostSimulatePlayer?.Invoke(peerId, player.Character, command, _server_sim_tick);
             LogJoinDiagnosticsIfDue(peerId, player, nowSec);
         }
 

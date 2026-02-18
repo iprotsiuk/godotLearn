@@ -33,6 +33,7 @@ public partial class NetSession
     private InputState _inputState;
     private int _jumpPressRepeatTicksRemaining;
     private int _firePressRepeatTicksRemaining;
+    private int _interactPressRepeatTicksRemaining;
 
     public override void _Notification(int what)
     {
@@ -86,6 +87,11 @@ public partial class NetSession
         _firePressRepeatTicksRemaining = Mathf.Clamp(1, 1, NetConstants.MaxInputRedundancy);
         RecordLocalFirePressDiag(_client_send_tick);
         TrySpawnPredictedLocalFireVisual();
+    }
+
+    private void TryLatchInteractPressed()
+    {
+        _interactPressRepeatTicksRemaining = Mathf.Clamp(1, 1, NetConstants.MaxInputRedundancy);
     }
 
     private void OnFocusOut()
@@ -154,6 +160,7 @@ public partial class NetSession
         _lastAckedSeq = _nextInputSeq;
         _jumpPressRepeatTicksRemaining = 0;
         _firePressRepeatTicksRemaining = 0;
+        _interactPressRepeatTicksRemaining = 0;
         _localCharacter?.ClearRenderCorrection();
         _localCharacter?.ClearViewCorrection();
 
@@ -173,6 +180,7 @@ public partial class NetSession
         Input.ActionRelease("move_right");
         Input.ActionRelease("jump");
         Input.ActionRelease("fire");
+        Input.ActionRelease("interact");
     }
 
     private void RecordLocalFirePressDiag(uint fireTick)

@@ -9,7 +9,8 @@ public enum InputButtons : byte
     None = 0,
     JumpPressed = 1 << 0,
     JumpHeld = 1 << 1,
-    FirePressed = 1 << 2
+    FirePressed = 1 << 2,
+    InteractPressed = 1 << 3
 }
 
 public struct InputCommand
