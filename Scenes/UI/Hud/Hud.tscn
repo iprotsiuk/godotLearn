@@ -66,7 +66,7 @@ text = "Ammo:"
 
 [node name="Value" type="Label" parent="Root/Panel/Margin/Rows/AmmoRow"]
 layout_mode = 2
-text = "30 / 90"
+text = "0"
 horizontal_alignment = 2
 
 [node name="Separator" type="HSeparator" parent="Root/Panel/Margin/Rows"]

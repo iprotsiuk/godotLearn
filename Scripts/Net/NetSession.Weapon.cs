@@ -703,6 +703,12 @@ public partial class NetSession
 			return;
 		}
 
+		uint nowTick = _mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow();
+		if (IsLocalWeaponCoolingDownAtTick(nowTick))
+		{
+			return;
+		}
+
 		Camera3D? camera = _localCharacter.LocalCamera;
 		if (camera is null || !GodotObject.IsInstanceValid(camera))
 		{

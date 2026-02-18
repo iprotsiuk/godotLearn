@@ -1,6 +1,7 @@
 // Scripts/Net/NetSession.Server.cs
 using System.Collections.Generic;
 using Godot;
+using NetRunnerSlice.Items;
 using NetRunnerSlice.Player;
 
 namespace NetRunnerSlice.Net;
@@ -261,6 +262,7 @@ public partial class NetSession
     private void TickServer(float delta)
     {
         _server_sim_tick++;
+        ProcessPickupRespawns();
 
         float fixedDt = 1.0f / _config.ServerTickRate;
         double nowSec = Time.GetTicksMsec() / 1000.0;
@@ -404,6 +406,35 @@ public partial class NetSession
                 NetChannels.Snapshot,
                 MultiplayerPeer.TransferModeEnum.UnreliableOrdered,
                 snapshotPayload);
+        }
+    }
+
+    private void ProcessPickupRespawns()
+    {
+        if (_pickupRespawnTickById.Count == 0)
+        {
+            return;
+        }
+
+        _pickupRespawnReadyScratch.Clear();
+        foreach (KeyValuePair<int, uint> pair in _pickupRespawnTickById)
+        {
+            if (_server_sim_tick >= pair.Value)
+            {
+                _pickupRespawnReadyScratch.Add(pair.Key);
+            }
+        }
+
+        foreach (int pickupId in _pickupRespawnReadyScratch)
+        {
+            _pickupRespawnTickById.Remove(pickupId);
+            _inactivePickups.Remove(pickupId);
+            if (_pickups.TryGetValue(pickupId, out PickupItem? pickup))
+            {
+                pickup.SetActive(true);
+            }
+
+            BroadcastPickupState(pickupId, active: true);
         }
     }
 

@@ -94,6 +94,12 @@ public partial class NetSession
             return;
         }
 
+        uint nowTick = _mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow();
+        if (IsLocalWeaponCoolingDownAtTick(nowTick))
+        {
+            return;
+        }
+
         _firePressRepeatTicksRemaining = Mathf.Clamp(1, 1, NetConstants.MaxInputRedundancy);
         RecordLocalFirePressDiag(_client_send_tick);
         TrySpawnPredictedLocalFireVisual();

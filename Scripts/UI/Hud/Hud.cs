@@ -17,7 +17,7 @@ public partial class Hud : Control
         _extrasRows = GetNode<VBoxContainer>("Root/Panel/Margin/Rows/Extras");
 
         SetHealth(100, 100);
-        SetAmmo(30, 90);
+        SetAmmo(0);
     }
 
     public void SetHealth(int current, int max)
@@ -32,7 +32,7 @@ public partial class Hud : Control
         _healthValue.Text = $"{safeCurrent} / {safeMax}";
     }
 
-    public void SetAmmo(int current, int reserve = -1)
+    public void SetAmmo(int current, int reserve = -1, float cooldownSec = 0.0f)
     {
         if (_ammoValue is null)
         {
@@ -40,9 +40,15 @@ public partial class Hud : Control
         }
 
         int safeCurrent = Mathf.Max(0, current);
-        _ammoValue.Text = reserve < 0
-            ? $"{safeCurrent} / INF"
+        string ammoText = reserve < 0
+            ? safeCurrent.ToString()
             : $"{safeCurrent} / {Mathf.Max(0, reserve)}";
+        if (cooldownSec > 0.0f)
+        {
+            ammoText += $" (CD {cooldownSec:0.0}s)";
+        }
+
+        _ammoValue.Text = ammoText;
     }
 
     public void SetStat(string key, string value)

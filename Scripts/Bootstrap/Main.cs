@@ -2,6 +2,7 @@
 using Godot;
 using NetRunnerSlice.Debug;
 using NetRunnerSlice.GameModes;
+using NetRunnerSlice.Items;
 using NetRunnerSlice.Match;
 using NetRunnerSlice.Net;
 using NetRunnerSlice.UI;
@@ -84,6 +85,19 @@ public partial class Main : Node
         _matchManager.Tick(metrics);
         _overlay?.Update(metrics, _session.IsServer, _session.IsClient);
         _hud?.SetHealth(metrics.LocalHealth, metrics.LocalHealthMax);
+        if (_session.TryGetLocalInventoryState(out ItemId itemId, out byte charges, out uint cooldownEndTick) && itemId == ItemId.FreezeGun)
+        {
+            uint nowTick = _session.IsServer ? metrics.ServerSimTick : metrics.ClientEstServerTick;
+            uint cooldownTicks = cooldownEndTick > nowTick ? cooldownEndTick - nowTick : 0;
+            float cooldownSec = cooldownTicks > 0
+                ? cooldownTicks / (float)Mathf.Max(1, _session.TickRate)
+                : 0.0f;
+            _hud?.SetAmmo(charges, cooldownSec: cooldownSec);
+        }
+        else
+        {
+            _hud?.SetAmmo(0);
+        }
     }
     public override void _UnhandledInput(InputEvent @event)
     {

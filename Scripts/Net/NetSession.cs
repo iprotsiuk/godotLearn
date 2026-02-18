@@ -95,7 +95,9 @@ public partial class NetSession : Node
     private readonly Dictionary<int, (byte ItemId, byte Charges, uint CooldownEndTick)> _clientInventory = new();
     private readonly Dictionary<int, PickupItem> _pickups = new();
     private readonly HashSet<int> _inactivePickups = new();
+    private readonly Dictionary<int, uint> _pickupRespawnTickById = new();
     private readonly Dictionary<int, uint> _freezeUntilTickByPeer = new();
+    private readonly List<int> _pickupRespawnReadyScratch = new();
     private readonly byte[] _inputPacket = new byte[NetConstants.InputPacketBytes];
     private readonly byte[] _snapshotPacket = new byte[NetConstants.SnapshotPacketBytes];
     private readonly byte[] _controlPacket = new byte[NetConstants.ControlPacketBytes];
@@ -260,7 +262,14 @@ public partial class NetSession : Node
             return null;
         }
 
-        return _serverCharactersByPeer.GetValueOrDefault(peerId);
+        if (!_serverPlayers.TryGetValue(peerId, out ServerPlayer? serverPlayer))
+        {
+            return null;
+        }
+
+        // Keep the convenience cache aligned with authoritative server-player state.
+        _serverCharactersByPeer[peerId] = serverPlayer.Character;
+        return serverPlayer.Character;
     }
 
     public bool TryGetServerCharacter(int peerId, out PlayerCharacter character)
@@ -271,9 +280,11 @@ public partial class NetSession : Node
             return false;
         }
 
-        if (_serverCharactersByPeer.TryGetValue(peerId, out PlayerCharacter? found))
+        if (_serverPlayers.TryGetValue(peerId, out ServerPlayer? serverPlayer))
         {
-            character = found;
+            character = serverPlayer.Character;
+            // Keep the convenience cache aligned with authoritative server-player state.
+            _serverCharactersByPeer[peerId] = serverPlayer.Character;
             return true;
         }
 
@@ -305,6 +316,8 @@ public partial class NetSession : Node
     public void UnregisterPickup(int pickupId)
     {
         _pickups.Remove(pickupId);
+        _inactivePickups.Remove(pickupId);
+        _pickupRespawnTickById.Remove(pickupId);
     }
 
     public bool RespawnServerPeerAtSpawn(int peerId)
@@ -384,33 +397,70 @@ public partial class NetSession : Node
     {
         if (!IsServer)
         {
+            GD.Print($"PickupConsumeRejected: peer={peerId} pickup={pickupId} reason=not_server");
             return false;
         }
 
         if (ServerCanPickupItem is not null && !ServerCanPickupItem(peerId))
         {
+            GD.Print($"PickupConsumeRejected: peer={peerId} pickup={pickupId} reason=mode_gate");
             return false;
         }
 
         if (!_pickups.TryGetValue(pickupId, out PickupItem? pickup))
         {
-            return false;
+            TryRecoverPickupRegistryEntry(pickupId, out pickup);
+            if (pickup is null)
+            {
+                GD.Print($"PickupConsumeRejected: peer={peerId} pickup={pickupId} reason=pickup_not_registered");
+                return false;
+            }
         }
 
         if (_inactivePickups.Contains(pickupId))
         {
+            GD.Print($"PickupConsumeRejected: peer={peerId} pickup={pickupId} reason=already_inactive");
             return false;
         }
 
         if (!ServerTryEquipItem(peerId, pickup.ItemId, pickup.Charges))
         {
+            GD.Print($"PickupConsumeRejected: peer={peerId} pickup={pickupId} reason=equip_denied");
             return false;
         }
 
         _inactivePickups.Add(pickupId);
+        int tickRate = Mathf.Max(1, TickRate);
+        uint respawnDelayTicks = (uint)(30 * tickRate);
+        _pickupRespawnTickById[pickupId] = _server_sim_tick + respawnDelayTicks;
         pickup.SetActive(false);
         BroadcastPickupState(pickupId, active: false);
+        GD.Print($"PickupConsumed: peer={peerId} pickup={pickupId} item={pickup.ItemId} charges={pickup.Charges}");
         return true;
+    }
+
+    private bool TryRecoverPickupRegistryEntry(int pickupId, out PickupItem? pickup)
+    {
+        pickup = null;
+        SceneTree? tree = GetTree();
+        if (tree is null)
+        {
+            return false;
+        }
+
+        foreach (Node node in tree.GetNodesInGroup("pickup_items"))
+        {
+            if (node is not PickupItem candidate || candidate.PickupId != pickupId)
+            {
+                continue;
+            }
+
+            RegisterPickup(candidate);
+            pickup = candidate;
+            return true;
+        }
+
+        return false;
     }
 
     public void ServerResetAllPickups()
@@ -421,6 +471,7 @@ public partial class NetSession : Node
         }
 
         _inactivePickups.Clear();
+        _pickupRespawnTickById.Clear();
         foreach (KeyValuePair<int, PickupItem> pair in _pickups)
         {
             int pickupId = pair.Key;
@@ -807,6 +858,7 @@ public partial class NetSession : Node
         _clientInventory.Clear();
         _pickups.Clear();
         _inactivePickups.Clear();
+        _pickupRespawnTickById.Clear();
         _freezeUntilTickByPeer.Clear();
         _localFreezeActive = false;
         _localCharacter?.QueueFree();
@@ -861,21 +913,55 @@ public partial class NetSession : Node
 
     private ItemId GetLocalEquippedItemForClientView()
     {
-        if (_localPeerId <= 0)
+        if (!TryGetLocalInventoryState(out ItemId itemId, out _, out _))
         {
             return ItemId.None;
         }
 
+        return itemId;
+    }
+
+    public bool TryGetLocalInventoryState(out ItemId itemId, out byte charges, out uint cooldownEndTick)
+    {
+        itemId = ItemId.None;
+        charges = 0;
+        cooldownEndTick = 0;
+        if (_localPeerId <= 0)
+        {
+            return false;
+        }
+
         if (IsServer && _serverPlayers.TryGetValue(_localPeerId, out ServerPlayer? localServerPlayer))
         {
-            return localServerPlayer.EquippedItem;
+            itemId = localServerPlayer.EquippedItem;
+            charges = localServerPlayer.EquippedCharges;
+            cooldownEndTick = localServerPlayer.EquippedCooldownEndTick;
+            return true;
         }
 
         if (_clientInventory.TryGetValue(_localPeerId, out (byte ItemId, byte Charges, uint CooldownEndTick) inventory))
         {
-            return (ItemId)inventory.ItemId;
+            itemId = (ItemId)inventory.ItemId;
+            charges = inventory.Charges;
+            cooldownEndTick = inventory.CooldownEndTick;
+            return true;
         }
 
-        return ItemId.None;
+        return false;
+    }
+
+    private bool IsLocalWeaponCoolingDownAtTick(uint tick)
+    {
+        if (!TryGetLocalInventoryState(out ItemId itemId, out _, out uint cooldownEndTick))
+        {
+            return false;
+        }
+
+        if (itemId == ItemId.None)
+        {
+            return false;
+        }
+
+        return tick < cooldownEndTick;
     }
 }
