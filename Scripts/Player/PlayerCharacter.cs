@@ -20,6 +20,10 @@ public partial class PlayerCharacter : CharacterBody3D
 	[Export] public NodePath CameraYawRootPath { get; set; } = new("CameraYawRoot");
 	[Export] public NodePath CameraPitchRootPath { get; set; } = new("CameraYawRoot/CameraPitchRoot");
 	[Export] public NodePath CollisionPath { get; set; } = new("Collision");
+	[Export] public string PreferredRunAnimation { get; set; } = "run";
+	[Export] public string PreferredIdleAnimation { get; set; } = "idle";
+	[Export(PropertyHint.Range, "0.0,3.0,0.01")] public float RunAnimationSpeedThreshold { get; set; } = 0.15f;
+	[Export(PropertyHint.Range, "0.0,1.0,0.01")] public float AnimationBlendSeconds { get; set; } = 0.12f;
 
 	private Node3D _visualRoot = null!;
 	private Node3D _visualYawRoot = null!;
@@ -29,6 +33,9 @@ public partial class PlayerCharacter : CharacterBody3D
 
 	private Node3D? _firstPersonViewRigRoot;
 	private Node3D? _thirdPersonModelRoot;
+	private AnimationPlayer? _thirdPersonAnimator;
+	private string _runAnimationName = string.Empty;
+	private string _idleAnimationName = string.Empty;
 	private Camera3D? _camera;
 	private Color _tint;
 	private bool _withCamera;
@@ -109,6 +116,7 @@ public partial class PlayerCharacter : CharacterBody3D
 		EnsureBound();
 
 		float dt = Mathf.Max(0.0f, (float)delta);
+		UpdateThirdPersonAnimation();
 
 		if (_renderOffset.LengthSquared() <= 0.000001f && _renderVelocity.LengthSquared() <= 0.000001f)
 		{
@@ -344,6 +352,7 @@ public partial class PlayerCharacter : CharacterBody3D
 		modelRoot.Visible = !_withCamera;
 		_visualYawRoot.AddChild(modelRoot);
 		_thirdPersonModelRoot = modelRoot;
+		BindThirdPersonAnimation(modelRoot);
 	}
 
 	private void EnsureFirstPersonViewRig()
@@ -444,6 +453,153 @@ public partial class PlayerCharacter : CharacterBody3D
 		{
 			ApplyTintRecursive(child, tint);
 		}
+	}
+
+	private void UpdateThirdPersonAnimation()
+	{
+		if (_thirdPersonAnimator is null)
+		{
+			return;
+		}
+
+		float horizontalSpeed = new Vector2(Velocity.X, Velocity.Z).Length();
+		bool shouldRun = horizontalSpeed >= Mathf.Max(0.0f, RunAnimationSpeedThreshold);
+
+		if (shouldRun)
+		{
+			if (!string.IsNullOrEmpty(_runAnimationName))
+			{
+				bool isCurrentRun = _thirdPersonAnimator.CurrentAnimation.ToString().Equals(_runAnimationName, System.StringComparison.Ordinal);
+				if (!isCurrentRun)
+				{
+					_thirdPersonAnimator.Play(_runAnimationName, Mathf.Max(0.0f, AnimationBlendSeconds));
+				}
+				else if (!_thirdPersonAnimator.IsPlaying())
+				{
+					// Imported clips can be non-looping/read-only; restart while movement continues.
+					_thirdPersonAnimator.Play(_runAnimationName, 0.0f);
+				}
+			}
+			return;
+		}
+
+		if (!string.IsNullOrEmpty(_idleAnimationName))
+		{
+			if (!_thirdPersonAnimator.CurrentAnimation.ToString().Equals(_idleAnimationName, System.StringComparison.Ordinal))
+			{
+				_thirdPersonAnimator.Play(_idleAnimationName, Mathf.Max(0.0f, AnimationBlendSeconds));
+			}
+			return;
+		}
+
+		if (_thirdPersonAnimator.IsPlaying())
+		{
+			_thirdPersonAnimator.Stop();
+			_thirdPersonAnimator.Seek(0.0, true);
+		}
+	}
+
+	private void BindThirdPersonAnimation(Node modelRoot)
+	{
+		_thirdPersonAnimator = FindAnimationPlayer(modelRoot);
+		if (_thirdPersonAnimator is null)
+		{
+			GD.PushWarning("Third-person model has no AnimationPlayer. Run/idle animation switching is disabled.");
+			return;
+		}
+
+		_runAnimationName = ResolveAnimationName(_thirdPersonAnimator, PreferredRunAnimation, "run", "sprint", "jog", "walk");
+		_idleAnimationName = ResolveAnimationName(_thirdPersonAnimator, PreferredIdleAnimation, "idle", "rest", "stand");
+
+		if (string.IsNullOrEmpty(_runAnimationName))
+		{
+			string[] available = _thirdPersonAnimator.GetAnimationList();
+			if (available.Length > 0)
+			{
+				_runAnimationName = available[0];
+				GD.PushWarning($"Could not resolve run animation. Falling back to first clip: {_runAnimationName}");
+			}
+			else
+			{
+				GD.PushWarning("Could not resolve a run animation on third-person model. Set PreferredRunAnimation on PlayerCharacter.");
+			}
+		}
+		else
+		{
+			_runAnimationName = EnsureLoopingAnimation(_thirdPersonAnimator, _runAnimationName);
+		}
+
+		if (string.IsNullOrEmpty(_idleAnimationName))
+		{
+			GD.PushWarning("Could not resolve an idle animation on third-person model. Set PreferredIdleAnimation on PlayerCharacter.");
+		}
+		else
+		{
+			_thirdPersonAnimator.Play(_idleAnimationName);
+		}
+	}
+
+	private static AnimationPlayer? FindAnimationPlayer(Node root)
+	{
+		if (root is AnimationPlayer animationPlayer)
+		{
+			return animationPlayer;
+		}
+
+		foreach (Node child in root.GetChildren())
+		{
+			AnimationPlayer? found = FindAnimationPlayer(child);
+			if (found is not null)
+			{
+				return found;
+			}
+		}
+
+		return null;
+	}
+
+	private static string ResolveAnimationName(AnimationPlayer player, string preferredName, params string[] fallbackKeywords)
+	{
+		if (!string.IsNullOrWhiteSpace(preferredName))
+		{
+			StringName preferred = new(preferredName);
+			if (player.HasAnimation(preferred))
+			{
+				return preferredName;
+			}
+		}
+
+		string[] animations = player.GetAnimationList();
+		foreach (string name in animations)
+		{
+			foreach (string keyword in fallbackKeywords)
+			{
+				if (name.Contains(keyword, System.StringComparison.OrdinalIgnoreCase))
+				{
+					return name;
+				}
+			}
+		}
+
+		return string.Empty;
+	}
+
+	private static string EnsureLoopingAnimation(AnimationPlayer player, string sourceAnimationName)
+	{
+		StringName sourceName = new(sourceAnimationName);
+		Animation? source = player.GetAnimation(sourceName);
+		if (source is null)
+		{
+			return sourceAnimationName;
+		}
+
+		if (source.LoopMode == Animation.LoopModeEnum.Linear)
+		{
+			return sourceAnimationName;
+		}
+
+		source.LoopMode = Animation.LoopModeEnum.Linear;
+		return sourceAnimationName;
 	}
 
 	private T RequireNode<T>(NodePath path, string pathName) where T : Node

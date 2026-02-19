@@ -1,8 +1,8 @@
 [gd_scene format=3 uid="uid://bg8as0owqn3nc"]
 
-[ext_resource type="PackedScene" uid="uid://bl4dlv48vb6ld" path="res://addons/characters/space_dude.glb" id="1_space_dude"]
+[ext_resource type="PackedScene" uid="uid://dk3hicvxg4kt1" path="res://imported_models/meshy_model_1771484527.18419.glb" id="2_meshy"]
 
 [node name="ThirdPersonModel" type="Node3D" unique_id=1465473391]
 
-[node name="SpaceDude" parent="." unique_id=29401522 instance=ExtResource("1_space_dude")]
-transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, 1.2970082, 0)
+[node name="MeshyAnimated" parent="." unique_id=1222802857 instance=ExtResource("2_meshy")]
+transform = Transform3D(-1.36, 0, -1.18894974e-07, 0, 1.36, 0, 1.18894974e-07, 0, -1.36, 0, 0.3475113, 0)

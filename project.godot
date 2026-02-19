@@ -19,6 +19,10 @@ config/icon="res://icon.svg"
 
 project/assembly_name="NetRunnerSlice"
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/meshy-godot-plugin/plugin.cfg")
+
 [physics]
 
 3d/physics_engine="Jolt Physics"
