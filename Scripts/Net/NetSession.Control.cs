@@ -37,26 +37,49 @@ public partial class NetSession
         bool changed =
             CurrentTagState.RoundIndex != sanitized.RoundIndex ||
             CurrentTagState.ItPeerId != sanitized.ItPeerId ||
-            CurrentTagState.ItCooldownEndTick != sanitized.ItCooldownEndTick;
+            CurrentTagState.ItCooldownEndTick != sanitized.ItCooldownEndTick ||
+            CurrentTagState.TagAppliedTick != sanitized.TagAppliedTick ||
+            CurrentTagState.TaggerPeerId != sanitized.TaggerPeerId ||
+            CurrentTagState.TaggedPeerId != sanitized.TaggedPeerId;
         CurrentTagState = sanitized;
+        if (changed)
+        {
+            MarkTagProcessedForDiag(CurrentTagState.TagAppliedTick);
+        }
         if (broadcast && changed && IsServer)
         {
             BroadcastTagStateFullToConnectedPeers();
         }
     }
 
-    public void SetCurrentTagStateDelta(int itPeerId, uint itCooldownEndTick, bool broadcast = true)
+    public void SetCurrentTagStateDelta(
+        int itPeerId,
+        uint itCooldownEndTick,
+        uint tagAppliedTick,
+        int taggerPeerId,
+        int taggedPeerId,
+        bool broadcast = true)
     {
         TagState sanitized = SanitizeTagState(new TagState
         {
             RoundIndex = CurrentTagState.RoundIndex,
             ItPeerId = itPeerId,
-            ItCooldownEndTick = itCooldownEndTick
+            ItCooldownEndTick = itCooldownEndTick,
+            TagAppliedTick = tagAppliedTick,
+            TaggerPeerId = taggerPeerId,
+            TaggedPeerId = taggedPeerId
         });
         bool changed =
             CurrentTagState.ItPeerId != sanitized.ItPeerId ||
-            CurrentTagState.ItCooldownEndTick != sanitized.ItCooldownEndTick;
+            CurrentTagState.ItCooldownEndTick != sanitized.ItCooldownEndTick ||
+            CurrentTagState.TagAppliedTick != sanitized.TagAppliedTick ||
+            CurrentTagState.TaggerPeerId != sanitized.TaggerPeerId ||
+            CurrentTagState.TaggedPeerId != sanitized.TaggedPeerId;
         CurrentTagState = sanitized;
+        if (changed)
+        {
+            MarkTagProcessedForDiag(CurrentTagState.TagAppliedTick);
+        }
         if (broadcast && changed && IsServer)
         {
             BroadcastTagStateDeltaToConnectedPeers();
@@ -312,22 +335,23 @@ public partial class NetSession
                 break;
             case ControlType.TagStateFull:
                 TagState fullState = SanitizeTagState(NetCodec.ReadControlTagStateFull(packet));
-                CurrentTagState = fullState;
                 GD.Print(
-                    $"NetSession: TagStateFull received roundIndex={fullState.RoundIndex} itPeerId={fullState.ItPeerId} cooldownEndTick={fullState.ItCooldownEndTick}");
-                TagStateFullReceived?.Invoke(fullState);
+                    $"NetSession: TagStateFull received roundIndex={fullState.RoundIndex} itPeerId={fullState.ItPeerId} cooldownEndTick={fullState.ItCooldownEndTick} tagAppliedTick={fullState.TagAppliedTick} taggerPeerId={fullState.TaggerPeerId} taggedPeerId={fullState.TaggedPeerId}");
+                QueueClientTagStateEvent(fullState, isFull: true);
                 break;
             case ControlType.TagStateDelta:
                 TagState deltaState = SanitizeTagState(new TagState
                 {
                     RoundIndex = CurrentTagState.RoundIndex,
                     ItPeerId = NetCodec.ReadControlTagStateDeltaItPeer(packet),
-                    ItCooldownEndTick = NetCodec.ReadControlTagStateDeltaCooldownEndTick(packet)
+                    ItCooldownEndTick = NetCodec.ReadControlTagStateDeltaCooldownEndTick(packet),
+                    TagAppliedTick = NetCodec.ReadControlTagStateDeltaAppliedTick(packet),
+                    TaggerPeerId = NetCodec.ReadControlTagStateDeltaTaggerPeer(packet),
+                    TaggedPeerId = NetCodec.ReadControlTagStateDeltaTaggedPeer(packet)
                 });
-                CurrentTagState = deltaState;
                 GD.Print(
-                    $"NetSession: TagStateDelta received itPeerId={deltaState.ItPeerId} cooldownEndTick={deltaState.ItCooldownEndTick}");
-                TagStateDeltaReceived?.Invoke(deltaState);
+                    $"NetSession: TagStateDelta received itPeerId={deltaState.ItPeerId} cooldownEndTick={deltaState.ItCooldownEndTick} tagAppliedTick={deltaState.TagAppliedTick} taggerPeerId={deltaState.TaggerPeerId} taggedPeerId={deltaState.TaggedPeerId}");
+                QueueClientTagStateEvent(deltaState, isFull: false);
                 break;
             case ControlType.InventoryState:
                 int peerId = NetCodec.ReadControlInventoryPeerId(packet);
@@ -409,7 +433,10 @@ public partial class NetSession
         {
             RoundIndex = Mathf.Max(0, state.RoundIndex),
             ItPeerId = state.ItPeerId,
-            ItCooldownEndTick = state.ItCooldownEndTick
+            ItCooldownEndTick = state.ItCooldownEndTick,
+            TagAppliedTick = state.TagAppliedTick,
+            TaggerPeerId = state.TaggerPeerId,
+            TaggedPeerId = state.TaggedPeerId
         };
     }
 
@@ -438,7 +465,13 @@ public partial class NetSession
     private void SendTagStateDeltaToPeer(int peerId)
     {
         CurrentTagState = SanitizeTagState(CurrentTagState);
-        NetCodec.WriteControlTagStateDelta(_controlPacket, CurrentTagState.ItPeerId, CurrentTagState.ItCooldownEndTick);
+        NetCodec.WriteControlTagStateDelta(
+            _controlPacket,
+            CurrentTagState.ItPeerId,
+            CurrentTagState.ItCooldownEndTick,
+            CurrentTagState.TagAppliedTick,
+            CurrentTagState.TaggerPeerId,
+            CurrentTagState.TaggedPeerId);
         SendPacket(peerId, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
     }
 

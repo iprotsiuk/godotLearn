@@ -25,6 +25,14 @@ public partial class TestWorldNavigationBootstrap : Node3D
             navigationRegion.NavigationMesh = new NavigationMesh();
         }
 
+        World3D? world = navigationRegion.GetWorld3D();
+        if (world is not null && world.NavigationMap.IsValid)
+        {
+            NavigationMesh navMesh = navigationRegion.NavigationMesh;
+            NavigationServer3D.MapSetCellSize(world.NavigationMap, navMesh.CellSize);
+            NavigationServer3D.MapSetCellHeight(world.NavigationMap, navMesh.CellHeight);
+        }
+
         navigationRegion.BakeNavigationMesh(false);
     }
 }

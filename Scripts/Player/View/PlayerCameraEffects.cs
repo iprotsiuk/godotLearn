@@ -1,5 +1,6 @@
 using Godot;
 using NetRunnerSlice.Player.Locomotion;
+using NetRunnerSlice.Rendering;
 
 namespace NetRunnerSlice.Player.View;
 
@@ -29,6 +30,11 @@ public partial class PlayerCameraEffects : Node3D
 		_baseRotation = Rotation;
 		_ownerCharacter = FindOwnerCharacter();
 		_camera = GetNodeOrNull<Camera3D>("Camera3D");
+		Node? weaponMount = GetNodeOrNull<Node>("WeaponMount");
+		if (weaponMount is not null)
+		{
+			RenderCompat.ForceOpaqueAndCheap(weaponMount);
+		}
 	}
 
 	public override void _Process(double delta)

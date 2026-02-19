@@ -126,15 +126,27 @@ public static partial class NetCodec
         WriteInt(packet, 2, state.RoundIndex);
         WriteInt(packet, 6, state.ItPeerId);
         WriteUInt(packet, 10, state.ItCooldownEndTick);
+        WriteUInt(packet, 14, state.TagAppliedTick);
+        WriteInt(packet, 18, state.TaggerPeerId);
+        WriteInt(packet, 22, state.TaggedPeerId);
     }
 
-    public static void WriteControlTagStateDelta(byte[] packet, int itPeerId, uint itCooldownEndTick)
+    public static void WriteControlTagStateDelta(
+        byte[] packet,
+        int itPeerId,
+        uint itCooldownEndTick,
+        uint tagAppliedTick,
+        int taggerPeerId,
+        int taggedPeerId)
     {
         System.Array.Clear(packet, 0, NetConstants.ControlPacketBytes);
         packet[0] = (byte)PacketType.Control;
         packet[1] = (byte)ControlType.TagStateDelta;
         WriteInt(packet, 2, itPeerId);
         WriteUInt(packet, 6, itCooldownEndTick);
+        WriteUInt(packet, 10, tagAppliedTick);
+        WriteInt(packet, 14, taggerPeerId);
+        WriteInt(packet, 18, taggedPeerId);
     }
 
     public static void WriteControlInventoryState(byte[] packet, int peerId, byte itemId, byte charges, uint cooldownEndTick)
@@ -263,13 +275,22 @@ public static partial class NetCodec
         {
             RoundIndex = ReadInt(packet, 2),
             ItPeerId = ReadInt(packet, 6),
-            ItCooldownEndTick = ReadUInt(packet, 10)
+            ItCooldownEndTick = ReadUInt(packet, 10),
+            TagAppliedTick = ReadUInt(packet, 14),
+            TaggerPeerId = ReadInt(packet, 18),
+            TaggedPeerId = ReadInt(packet, 22)
         };
     }
 
     public static int ReadControlTagStateDeltaItPeer(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
 
     public static uint ReadControlTagStateDeltaCooldownEndTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 6);
+
+    public static uint ReadControlTagStateDeltaAppliedTick(ReadOnlySpan<byte> packet) => ReadUInt(packet, 10);
+
+    public static int ReadControlTagStateDeltaTaggerPeer(ReadOnlySpan<byte> packet) => ReadInt(packet, 14);
+
+    public static int ReadControlTagStateDeltaTaggedPeer(ReadOnlySpan<byte> packet) => ReadInt(packet, 18);
 
     public static int ReadControlInventoryPeerId(ReadOnlySpan<byte> packet) => ReadInt(packet, 2);
 

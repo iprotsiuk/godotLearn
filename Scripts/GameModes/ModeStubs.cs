@@ -1,4 +1,5 @@
 // Scripts/GameModes/ModeStubs.cs
+using Godot;
 using NetRunnerSlice.Match;
 using NetRunnerSlice.Net;
 using NetRunnerSlice.Player;
@@ -47,6 +48,20 @@ public sealed class RaceModeStub : IGameMode
     public void ClientOnTagState(MatchManager matchManager, NetSession session, TagState state, bool isFull)
     {
     }
+
+    public bool ServerTryHandleFreezeGunShot(
+        MatchManager matchManager,
+        NetSession session,
+        int shooterPeerId,
+        Vector3 origin,
+        Vector3 direction,
+        float maxDistance,
+        uint tick,
+        out Vector3 hitPoint)
+    {
+        hitPoint = origin + (direction * maxDistance);
+        return false;
+    }
 }
 
 public sealed class TagModeStub : IGameMode
@@ -90,5 +105,19 @@ public sealed class TagModeStub : IGameMode
 
     public void ClientOnTagState(MatchManager matchManager, NetSession session, TagState state, bool isFull)
     {
+    }
+
+    public bool ServerTryHandleFreezeGunShot(
+        MatchManager matchManager,
+        NetSession session,
+        int shooterPeerId,
+        Vector3 origin,
+        Vector3 direction,
+        float maxDistance,
+        uint tick,
+        out Vector3 hitPoint)
+    {
+        hitPoint = origin + (direction * maxDistance);
+        return false;
     }
 }

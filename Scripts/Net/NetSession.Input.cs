@@ -7,6 +7,7 @@ namespace NetRunnerSlice.Net;
 public partial class NetSession
 {
     private const double FocusOutResetGraceSec = 0.35;
+    private const double DebugFocusHarnessDurationSec = 3.0;
 
     private const int FirePressDiagCapacity = 128;
 
@@ -34,6 +35,8 @@ public partial class NetSession
     private int _jumpPressRepeatTicksRemaining;
     private int _firePressRepeatTicksRemaining;
     private int _interactPressRepeatTicksRemaining;
+    private bool _debugFocusHarnessActive;
+    private double _debugFocusHarnessUntilSec;
 
     public override void _Notification(int what)
     {
@@ -49,6 +52,7 @@ public partial class NetSession
 
     private void CaptureInputState()
     {
+        UpdateDebugFocusHarnessState(Time.GetTicksMsec() / 1000.0);
         ProcessDeferredFocusOutReset();
         if (IsFocusInputSuppressed() || IsLocalFrozenAtTick(_mode == RunMode.ListenServer ? _server_sim_tick : GetEstimatedServerTickNow()))
         {
@@ -118,12 +122,49 @@ public partial class NetSession
     private void OnFocusOut()
     {
         LogFocusDiag("out");
+        _hasFocus = false;
+        ApplyUnfocusedNetworkingPolicyIfNeeded();
+        if (_mode == RunMode.Client && IsTransportConnected())
+        {
+            _clientFocusMode = ClientFocusMode.Unfocused;
+            _focusOutPending = false;
+            _focusOutResetApplied = false;
+            _focusOutStartedAtSec = Time.GetTicksMsec() / 1000.0;
+            _inputState = default;
+            _jumpPressRepeatTicksRemaining = 0;
+            _firePressRepeatTicksRemaining = 0;
+            _interactPressRepeatTicksRemaining = 0;
+            _frozenYaw = _lookYaw;
+            _frozenPitch = _lookPitch;
+            if (_localCharacter is not null)
+            {
+                _localCharacter.SetLook(_frozenYaw, _frozenPitch);
+                _localCharacter.Velocity = Vector3.Zero;
+                _localCharacter.ResetLocomotionFromAuthoritative(_localCharacter.Grounded);
+            }
+
+            ReleaseGameplayActions();
+            Input.FlushBufferedEvents();
+            GD.Print(
+                $"FocusOut: entering Unfocused mode serverTick={_lastAuthoritativeServerTick} " +
+                $"client_send_tick={_client_send_tick} pendingInputs={_pendingInputs.Count}");
+            return;
+        }
+
+        if (ShouldKeepNetworkingWhenUnfocused() && _mode == RunMode.Client && IsTransportConnected())
+        {
+            _focusOutPending = false;
+            _focusOutResetApplied = false;
+            _focusOutStartedAtSec = Time.GetTicksMsec() / 1000.0;
+            _inputState = default;
+            return;
+        }
+
         if (_config.AllowInputWhenUnfocused)
         {
             return;
         }
 
-        _hasFocus = false;
         _focusOutPending = true;
         _focusOutResetApplied = false;
         _focusOutStartedAtSec = Time.GetTicksMsec() / 1000.0;
@@ -133,15 +174,36 @@ public partial class NetSession
     private void OnFocusIn()
     {
         LogFocusDiag("in");
+        _hasFocus = true;
+        ApplyUnfocusedNetworkingPolicyIfNeeded();
+        if (_mode == RunMode.Client && IsTransportConnected() && _clientFocusMode == ClientFocusMode.Unfocused)
+        {
+            _clientFocusMode = ClientFocusMode.Focused;
+            _focusOutPending = false;
+            _focusOutResetApplied = false;
+            _inputState = default;
+            PerformFocusInHardReset();
+            ReleaseGameplayActions();
+            Input.FlushBufferedEvents();
+            return;
+        }
+
+        if (ShouldKeepNetworkingWhenUnfocused() && _mode == RunMode.Client && IsTransportConnected())
+        {
+            _focusOutPending = false;
+            _focusOutResetApplied = false;
+            _inputState = default;
+            Input.FlushBufferedEvents();
+            return;
+        }
+
         if (_config.AllowInputWhenUnfocused)
         {
-            _hasFocus = true;
             _focusOutPending = false;
             _focusOutResetApplied = false;
             return;
         }
 
-        _hasFocus = true;
         double nowSec = Time.GetTicksMsec() / 1000.0;
         bool transientFocusBlip = _focusOutPending &&
             !_focusOutResetApplied &&
@@ -160,8 +222,94 @@ public partial class NetSession
         Input.FlushBufferedEvents();
     }
 
+    private void ToggleDebugFocusHarness()
+    {
+        if (!OS.IsDebugBuild())
+        {
+            return;
+        }
+
+        if (!IsClient || _mode != RunMode.Client || !IsTransportConnected())
+        {
+            GD.PushWarning("FocusHarness: requires connected client mode.");
+            return;
+        }
+
+        if (_debugFocusHarnessActive)
+        {
+            DeactivateDebugFocusHarness("manual_toggle");
+        }
+        else
+        {
+            ActivateDebugFocusHarness(DebugFocusHarnessDurationSec);
+        }
+    }
+
+    private void ActivateDebugFocusHarness(double durationSec)
+    {
+        double nowSec = Time.GetTicksMsec() / 1000.0;
+        _debugFocusHarnessActive = true;
+        _debugFocusHarnessUntilSec = nowSec + durationSec;
+        _inputState = default;
+        _jumpPressRepeatTicksRemaining = 0;
+        _firePressRepeatTicksRemaining = 0;
+        _interactPressRepeatTicksRemaining = 0;
+        _frozenYaw = _lookYaw;
+        _frozenPitch = _lookPitch;
+        if (_localCharacter is not null)
+        {
+            _localCharacter.SetLook(_frozenYaw, _frozenPitch);
+            _localCharacter.Velocity = Vector3.Zero;
+            _localCharacter.ResetLocomotionFromAuthoritative(_localCharacter.Grounded);
+        }
+
+        ReleaseGameplayActions();
+        Input.FlushBufferedEvents();
+        GD.Print(
+            $"FocusHarness: start duration_sec={durationSec:0.0} serverTick={_lastAuthoritativeServerTick} " +
+            $"client_send_tick={_client_send_tick} pendingInputs={_pendingInputs.Count}");
+    }
+
+    private void DeactivateDebugFocusHarness(string reason)
+    {
+        if (!_debugFocusHarnessActive)
+        {
+            return;
+        }
+
+        _debugFocusHarnessActive = false;
+        _debugFocusHarnessUntilSec = 0.0;
+        _inputState = default;
+        PerformFocusInHardReset();
+        ReleaseGameplayActions();
+        Input.FlushBufferedEvents();
+        GD.Print(
+            $"FocusHarness: end reason={reason} serverTick={_lastAuthoritativeServerTick} " +
+            $"client_send_tick={_client_send_tick} pendingInputs={_pendingInputs.Count}");
+    }
+
+    private void UpdateDebugFocusHarnessState(double nowSec)
+    {
+        if (!_debugFocusHarnessActive)
+        {
+            return;
+        }
+
+        if (nowSec < _debugFocusHarnessUntilSec)
+        {
+            return;
+        }
+
+        DeactivateDebugFocusHarness("timer_elapsed");
+    }
+
     private void ProcessDeferredFocusOutReset()
     {
+        if (ShouldKeepNetworkingWhenUnfocused() && _mode == RunMode.Client && IsTransportConnected())
+        {
+            return;
+        }
+
         if (_config.AllowInputWhenUnfocused)
         {
             return;

@@ -15,6 +15,7 @@ public static class InputBootstrap
         EnsureKeyAction("interact", Key.E);
         EnsureKeyAction("quit", Key.Escape);
         EnsureKeyAction("toggle_debug", Key.F1);
+        EnsureKeyAction("debug_focus_harness_toggle", Key.F8);
         EnsureMouseAction("fire", MouseButton.Left);
     }
 

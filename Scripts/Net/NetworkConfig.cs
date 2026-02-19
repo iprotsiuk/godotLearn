@@ -1,4 +1,6 @@
 // Scripts/Net/NetworkConfig.cs
+using Godot;
+
 namespace NetRunnerSlice.Net;
 
 public sealed class NetworkConfig
@@ -34,6 +36,7 @@ public sealed class NetworkConfig
     public float LocalFov { get; set; } = 90.0f;
     public float PitchClampDegrees { get; set; } = 89.0f;
     public bool AllowInputWhenUnfocused { get; set; } = true;
+    public bool KeepNetworkingWhenUnfocused { get; set; } = OS.HasFeature("windows") || OS.HasFeature("macos") || OS.HasFeature("linuxbsd");
     public bool EnableFrameHitchDiagnostics { get; set; } = true;
     public float PhysicsHitchThresholdMs { get; set; } = 35.0f;
     public float ProcessHitchThresholdMs { get; set; } = 45.0f;

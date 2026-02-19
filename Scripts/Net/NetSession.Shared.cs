@@ -25,6 +25,8 @@ public partial class NetSession
             return;
         }
 
+        _lastPacketProcessedAtSec = Time.GetTicksMsec() / 1000.0;
+
         int fromPeer = (int)fromPeerLong;
         PacketType packetType = (PacketType)packet[0];
         if (IsServer && (packetType == PacketType.Fire || (_logControlPackets && packetType == PacketType.Control)))
@@ -235,6 +237,7 @@ public partial class NetSession
 
     private void UpdateMetrics()
     {
+        double nowSec = Time.GetTicksMsec() / 1000.0;
         if (IsClient && _lastAuthoritativeServerTick > 0)
         {
             uint estimatedNow = GetEstimatedServerTickNow();
@@ -243,7 +246,6 @@ public partial class NetSession
 
         if (IsClient)
         {
-            double nowSec = Time.GetTicksMsec() / 1000.0;
             _snapshotAgeMs = _lastAuthoritativeSnapshotAtSec > 0.0
                 ? (float)((nowSec - _lastAuthoritativeSnapshotAtSec) * 1000.0)
                 : -1.0f;
@@ -253,8 +255,8 @@ public partial class NetSession
             _snapshotAgeMs = -1.0f;
         }
 
-        UpdateDropFutureRate(Time.GetTicksMsec() / 1000.0);
-        UpdateCorrectionRate(Time.GetTicksMsec() / 1000.0);
+        UpdateDropFutureRate(nowSec);
+        UpdateCorrectionRate(nowSec);
 
         float rttMs = _rttMs;
         float jitterMs = _jitterMs;
@@ -299,6 +301,9 @@ public partial class NetSession
         }
 
         int inputDelayTicksMetric = IsClient ? _appliedInputDelayTicks : _config.ServerInputDelayTicks;
+        double lastNetPollBaseSec = _lastPacketProcessedAtSec > 0.0 ? _lastPacketProcessedAtSec : _lastNetPollAtSec;
+        float lastNetPollAgeMs = lastNetPollBaseSec > 0.0 ? (float)((nowSec - lastNetPollBaseSec) * 1000.0) : -1.0f;
+        float lastInputSendAgeMs = _lastInputSendAtSec > 0.0 ? (float)((nowSec - _lastInputSendAtSec) * 1000.0) : -1.0f;
         Vector3 renderCorrectionOffset = _localCharacter?.RenderCorrectionOffset ?? Vector3.Zero;
         Vector3 viewCorrectionOffset = _localCharacter?.ViewCorrectionOffset ?? Vector3.Zero;
         Vector3 cameraCorrectionOffset = _localCharacter?.CameraCorrectionOffset ?? Vector3.Zero;
@@ -335,6 +340,12 @@ public partial class NetSession
             DynamicInterpolationDelayMs = dynamicInterpDelayMs,
             SessionJitterEstimateMs = sessionSnapshotJitterMs,
             SnapshotAgeMs = _snapshotAgeMs,
+            LastNetPollAgeMs = lastNetPollAgeMs,
+            LastInputSendAgeMs = lastInputSendAgeMs,
+            WindowHasFocus = _hasFocus,
+            RealtimeStallMs = _realtimeStallMs,
+            HardResetCount = _hardResetCount,
+            LastHardResetReason = _lastHardResetReason,
             TickErrorTicks = _tickErrorTicks,
             ClientSendTick = _client_send_tick > 0 ? _client_send_tick - 1 : 0,
             DropFutureRatePerSec = _dropFutureRatePerSec,

@@ -150,6 +150,15 @@ public partial class DebugOverlay : CanvasLayer
         string snapshotAgeText = metrics.SnapshotAgeMs < 0.0f
             ? "N/A"
             : $"{metrics.SnapshotAgeMs:0.0} ms";
+        string lastNetPollAgeText = metrics.LastNetPollAgeMs < 0.0f
+            ? "N/A"
+            : $"{metrics.LastNetPollAgeMs:0.0} ms";
+        string lastInputSendAgeText = metrics.LastInputSendAgeMs < 0.0f
+            ? "N/A"
+            : $"{metrics.LastInputSendAgeMs:0.0} ms";
+        string realtimeStallText = metrics.RealtimeStallMs < 0.0f
+            ? "N/A"
+            : $"{metrics.RealtimeStallMs:0.0} ms";
         string serverPeerRttText = metrics.ServerPeerRttMs < 0.0f ? "N/A" : $"{metrics.ServerPeerRttMs:0.0} ms";
         string serverPeerJitterText = metrics.ServerPeerJitterMs < 0.0f ? "N/A" : $"{metrics.ServerPeerJitterMs:0.0} ms";
         uint serverUsageTotal = metrics.ServerTicksUsedBufferedInput + metrics.ServerTicksUsedHoldLast + metrics.ServerTicksUsedNeutral;
@@ -169,6 +178,12 @@ public partial class DebugOverlay : CanvasLayer
             $"\nGlobal Interp Delay: {interpDelayText}" +
             $"\nSession Jitter Estimate: {sessionJitterText}" +
             $"\nSnapshot Age: {snapshotAgeText}" +
+            $"\nLast Net Poll Age: {lastNetPollAgeText}" +
+            $"\nLast Input Send Age: {lastInputSendAgeText}" +
+            $"\nRealtime Stall (2s max): {realtimeStallText}" +
+            $"\nWindow Has Focus: {(metrics.WindowHasFocus ? "Yes" : "No")}" +
+            $"\nHard Reset Count: {metrics.HardResetCount}" +
+            $"\nLast Hard Reset Reason: {metrics.LastHardResetReason}" +
             $"\nLast Acked Seq: {metrics.LastAckedInput}" +
             $"\nPending Inputs Count/Cap: {metrics.PendingInputCount}/{metrics.PendingInputsCap}" +
             $"\nDropFuture Rate (5s): {metrics.DropFutureRatePerSec:0.00}/s" +

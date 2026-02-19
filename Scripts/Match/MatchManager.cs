@@ -62,6 +62,7 @@ public sealed class MatchManager
         _lastClientState = SanitizeMatchState(session.CurrentMatchState);
         _lastClientTagState = SanitizeTagState(session.CurrentTagState);
         session.ServerCanPickupItem = ServerCanPickupItem;
+        session.ServerTryHandleFreezeGunShot = ServerTryHandleFreezeGunShot;
 
         session.MatchConfigReceived += OnMatchConfigReceived;
         session.MatchStateReceived += OnMatchStateReceived;
@@ -87,6 +88,7 @@ public sealed class MatchManager
         _session.ServerPeerLeft -= OnServerPeerLeft;
         _session.ServerPostSimulatePlayer -= OnServerPostSimulatePlayer;
         _session.ServerCanPickupItem = null;
+        _session.ServerTryHandleFreezeGunShot = null;
 
         _session = null;
         _serverActive = false;
@@ -288,7 +290,7 @@ public sealed class MatchManager
         ActivateMode(config.ModeId);
 
         RoundParticipants.Clear();
-        foreach (int peerId in _session.GetServerPeerIds())
+        foreach (int peerId in _session.ServerPlayers.Keys)
         {
             RoundParticipants.Add(peerId);
         }
@@ -296,7 +298,7 @@ public sealed class MatchManager
         SpectatorsUntilNextRound.Clear();
         if (config.ModeId == GameModeId.TagClassic && !IsTagMinimumPlayersMet())
         {
-            EnterWaitingForTagPlayers();
+            EnterWaitingForTagPlayers(nowTick);
             return;
         }
 
@@ -312,7 +314,7 @@ public sealed class MatchManager
         _activeMode?.ServerOnRoundStart(this, _session);
     }
 
-    private void EnterWaitingForTagPlayers()
+    private void EnterWaitingForTagPlayers(uint nowTick)
     {
         if (_session is null)
         {
@@ -326,7 +328,10 @@ public sealed class MatchManager
         {
             RoundIndex = RoundIndex,
             ItPeerId = -1,
-            ItCooldownEndTick = 0
+            ItCooldownEndTick = 0,
+            TagAppliedTick = nowTick,
+            TaggerPeerId = -1,
+            TaggedPeerId = -1
         }, broadcast: true);
     }
 
@@ -408,6 +413,31 @@ public sealed class MatchManager
         }
 
         _activeMode?.ServerOnPostSimulatePlayer(this, _session, peerId, serverCharacter, cmd, tick);
+    }
+
+    private bool ServerTryHandleFreezeGunShot(
+        int shooterPeerId,
+        Vector3 origin,
+        Vector3 direction,
+        float maxDistance,
+        uint tick,
+        out Vector3 hitPoint)
+    {
+        hitPoint = origin + (direction * maxDistance);
+        if (_session is null || !_session.IsServer || !_serverActive || _activeMode is null)
+        {
+            return false;
+        }
+
+        return _activeMode.ServerTryHandleFreezeGunShot(
+            this,
+            _session,
+            shooterPeerId,
+            origin,
+            direction,
+            maxDistance,
+            tick,
+            out hitPoint);
     }
 
     private bool ServerCanPickupItem(int peerId)
@@ -567,7 +597,10 @@ public sealed class MatchManager
         {
             RoundIndex = Mathf.Max(0, state.RoundIndex),
             ItPeerId = state.ItPeerId,
-            ItCooldownEndTick = state.ItCooldownEndTick
+            ItCooldownEndTick = state.ItCooldownEndTick,
+            TagAppliedTick = state.TagAppliedTick,
+            TaggerPeerId = state.TaggerPeerId,
+            TaggedPeerId = state.TaggedPeerId
         };
     }
 
@@ -578,7 +611,7 @@ public sealed class MatchManager
             return false;
         }
 
-        return _session.GetServerPeerIds().Length >= 2;
+        return _session.ServerPeerCount >= 2;
     }
 
     private bool IsWaitingForTagPlayers()

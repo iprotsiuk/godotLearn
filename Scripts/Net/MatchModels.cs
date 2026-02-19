@@ -26,4 +26,7 @@ public struct TagState
     public int RoundIndex;
     public int ItPeerId;
     public uint ItCooldownEndTick;
+    public uint TagAppliedTick;
+    public int TaggerPeerId;
+    public int TaggedPeerId;
 }

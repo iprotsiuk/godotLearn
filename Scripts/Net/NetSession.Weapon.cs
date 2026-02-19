@@ -125,6 +125,17 @@ public partial class NetSession
 			hitPoint = foundPoint;
 		}
 
+		bool hitSpecialTarget = false;
+		if (hitPeer < 0 &&
+			isFreezeGun &&
+			ServerTryHandleFreezeGunShot is not null &&
+			ServerTryHandleFreezeGunShot(shooterPeerId, origin, rayDirection, maxShotDistance, fireTick, out Vector3 specialHitPoint))
+		{
+			hitSpecialTarget = true;
+			hitPeer = SpecialHitPeerId;
+			hitPoint = specialHitPoint;
+		}
+
 		int tickAlignment = (int)_server_sim_tick - (int)fireTick;
 		GD.Print(
 			$"FireEval: serverTick={_server_sim_tick} fireTick={fireTick} targetTick={targetTick} " +
@@ -153,13 +164,13 @@ public partial class NetSession
 			HitPeerId = hitPeer,
 			ValidatedServerTick = targetTick
 		};
-		if (hitPeer >= 0)
+		if (hitPeer >= 0 || hitSpecialTarget)
 		{
-			if (isFreezeGun)
+			if (isFreezeGun && hitPeer >= 0)
 			{
 				ServerApplyFreeze(hitPeer, 1.0f);
 			}
-			else
+			else if (!isFreezeGun && hitPeer >= 0)
 			{
 				ApplyWeaponDamage(hitPeer, WeaponHitDamage);
 			}
@@ -181,11 +192,11 @@ public partial class NetSession
 			Yaw = DirectionToYaw(rayDirection),
 			Pitch = DirectionToPitch(rayDirection),
 			HitPoint = hitPoint,
-			DidHit = hitPeer >= 0 || blockedByWorld
+			DidHit = hitPeer >= 0 || hitSpecialTarget || blockedByWorld
 		};
 		NetCodec.WriteFireVisual(_fireVisualPacket, visual);
 		BroadcastFireVisual(_fireVisualPacket);
-		DrawDebugShot(origin, hitPoint, hitPeer >= 0);
+		DrawDebugShot(origin, hitPoint, hitPeer >= 0 || hitSpecialTarget);
 	}
 
 	private void HandleFireResult(byte[] packet)
@@ -200,7 +211,7 @@ public partial class NetSession
 			return;
 		}
 
-		if (result.HitPeerId >= 0)
+		if (result.HitPeerId >= 0 || result.HitPeerId == SpecialHitPeerId)
 		{
 			GD.Print($"FireResult: shooter={result.ShooterPeerId} hit={result.HitPeerId} tick={result.ValidatedServerTick}");
 		}
@@ -226,7 +237,7 @@ public partial class NetSession
 				GD.Print($"FireLatencyDiag: missMapping fireTick={fireTick} validatedTick={result.ValidatedServerTick}");
 			}
 
-			ShowHitIndicator(result.HitPeerId >= 0);
+			ShowHitIndicator(result.HitPeerId >= 0 || result.HitPeerId == SpecialHitPeerId);
 		}
 
 		if (result.HitPeerId == _localPeerId && result.ShooterPeerId != _localPeerId)

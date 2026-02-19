@@ -130,6 +130,12 @@ public struct SessionMetrics
     public float DynamicInterpolationDelayMs;
     public float SessionJitterEstimateMs;
     public float SnapshotAgeMs;
+    public float LastNetPollAgeMs;
+    public float LastInputSendAgeMs;
+    public bool WindowHasFocus;
+    public float RealtimeStallMs;
+    public uint HardResetCount;
+    public string LastHardResetReason;
     public int TickErrorTicks;
     public uint ClientSendTick;
     public float DropFutureRatePerSec;

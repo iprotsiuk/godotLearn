@@ -21,6 +21,14 @@ public partial class NetSession
     private const float ReconcileDeadzoneYMeters = 0.010f;
     private const uint FutureDropBurstThreshold = 10;
     private const double FutureDropBurstWindowSec = 1.0;
+    private const float StallWarnMs = 100.0f;
+    private const float StallHardResetMs = 250.0f;
+    private const float StallResyncMs = 800.0f;
+#if DEBUG
+    private const bool DebugRegressionAssertMode = true;
+#else
+    private const bool DebugRegressionAssertMode = false;
+#endif
     private double _nextSnapshotRecvDiagAtSec;
     private double _nextAheadOfHorizonDiagAtSec;
     private double _nextInputSendDiagAtSec;
@@ -33,6 +41,11 @@ public partial class NetSession
     private uint _lastSeenDroppedFutureInputCount;
     private double _lastSeenDroppedFutureAtSec;
     private double _nextServerFutureDropGuardResyncAtSec;
+    private uint _debugLastLoggedResyncCount;
+    private double _debugMissingWindowStartSec;
+    private uint _debugMissingWindowStartMax;
+    private uint _debugMissingWindowStartDroppedOld;
+    private uint _debugMissingWindowStartDroppedFuture;
 
     private void ClientConnectedToServer()
     {
@@ -45,6 +58,11 @@ public partial class NetSession
         SendPacket(1, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
         GD.Print("NetSession: Hello sent");
         _nextPingTimeSec = (Time.GetTicksMsec() / 1000.0) + 0.1;
+        _debugLastLoggedResyncCount = _resyncCount;
+        _debugMissingWindowStartSec = 0.0;
+        _debugMissingWindowStartMax = 0;
+        _debugMissingWindowStartDroppedOld = 0;
+        _debugMissingWindowStartDroppedFuture = 0;
     }
 
     private void TickClient(float delta)
@@ -52,6 +70,14 @@ public partial class NetSession
         UpdateLocalWeaponView();
         ulong nowUsec = (ulong)GetLocalUsec();
         double nowSec = nowUsec / 1_000_000.0;
+        if (IsClientPredictionSuspended())
+        {
+            TickClientWhileUnfocused(nowSec);
+            UpdateRealtimeStallWindow(nowSec, 0.0f);
+            _lastClientTickUsec = nowUsec;
+            return;
+        }
+
         float realDeltaSec = 0.0f;
         if (_lastClientTickUsec != 0)
         {
@@ -60,14 +86,32 @@ public partial class NetSession
                 : NetConstants.StallEpochThresholdSeconds + 1.0f;
         }
 
-        if (realDeltaSec > NetConstants.StallEpochThresholdSeconds)
+        float realtimeStallMs = GetRealtimeStallMs(nowSec, realDeltaSec);
+        UpdateRealtimeStallWindow(nowSec, realtimeStallMs);
+        if (realtimeStallMs >= StallWarnMs && nowSec >= _nextResyncDiagLogAtSec)
         {
-            AdvanceInputEpoch(resetTickToServerEstimate: true);
-            if (nowSec >= _nextClientRealtimeStallResyncAtSec)
-            {
-                TriggerClientResync("client_realtime_stall", _lastAuthoritativeServerTick);
-                _nextClientRealtimeStallResyncAtSec = nowSec + 0.5;
-            }
+            _nextResyncDiagLogAtSec = nowSec + JoinDiagnosticsLogIntervalSec;
+            double pollBaseSec = _lastPacketProcessedAtSec > 0.0 ? _lastPacketProcessedAtSec : _lastNetPollAtSec;
+            GD.Print(
+                $"RealtimeStallWarn: stall_ms={realtimeStallMs:0.0} hard_ms={StallHardResetMs:0.0} " +
+                $"resync_ms={StallResyncMs:0.0} lastPollAgeMs={GetAgeMsOrNeg1(nowSec, pollBaseSec):0.0} " +
+                $"lastInputAgeMs={GetAgeMsOrNeg1(nowSec, _lastInputSendAtSec):0.0} lastSnapshotApplyAgeMs={GetAgeMsOrNeg1(nowSec, _lastSnapshotAppliedAtSec):0.0}");
+        }
+
+        if (realtimeStallMs >= StallResyncMs && nowSec >= _nextClientRealtimeStallResyncAtSec)
+        {
+            PerformHardPredictionReset("client_realtime_stall", (long)nowUsec, nowSec);
+            _nextClientRealtimeStallResyncAtSec = nowSec + 0.5;
+            _lastClientTickUsec = nowUsec;
+            return;
+        }
+
+        if (realtimeStallMs >= StallHardResetMs && nowSec >= _nextClientRealtimeStallResyncAtSec)
+        {
+            PerformHardPredictionReset("frame_hitch", (long)nowUsec, nowSec);
+            _nextClientRealtimeStallResyncAtSec = nowSec + 0.5;
+            _lastClientTickUsec = nowUsec;
+            return;
         }
 
         if (_mode == RunMode.Client && !IsTransportConnected())
@@ -77,6 +121,7 @@ public partial class NetSession
         }
 
         _client_est_server_tick = GetEstimatedServerTickNow();
+        ApplyQueuedTagStateEventsUpToTick(_client_est_server_tick, resimReplayed: false, _lastAuthoritativeServerTick);
         MaybeResyncClient("tick_drift_guard");
         UpdateAppliedInputDelayTicks();
 
@@ -132,34 +177,114 @@ public partial class NetSession
             return;
         }
 
-        if (nowSec >= _nextPingTimeSec)
-        {
-            _pingSeq++;
-            uint nowMs = (uint)Time.GetTicksMsec();
-            _pingSent[_pingSeq] = nowSec;
-            if (_pingSent.Count > NetConstants.MaxOutstandingPings)
-            {
-                ushort oldestSeq = 0;
-                bool found = false;
-                foreach (ushort seq in _pingSent.Keys)
-                {
-                    oldestSeq = seq;
-                    found = true;
-                    break;
-                }
-
-                if (found)
-                {
-                    _pingSent.Remove(oldestSeq);
-                }
-            }
-
-            NetCodec.WriteControlPing(_controlPacket, _pingSeq, nowMs);
-            SendPacket(1, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
-            _nextPingTimeSec = nowSec + NetConstants.PingIntervalSec;
-        }
+        SendClientPingIfDue(nowSec);
 
         _lastClientTickUsec = nowUsec;
+        DebugRegressionLogResyncIncrement(nowSec);
+    }
+
+    private bool IsClientPredictionSuspended()
+    {
+        return _mode == RunMode.Client && (_clientFocusMode == ClientFocusMode.Unfocused || _debugFocusHarnessActive);
+    }
+
+    private void TickClientWhileUnfocused(double nowSec)
+    {
+        if (_localCharacter is not null)
+        {
+            _localCharacter.SetLook(_frozenYaw, _frozenPitch);
+            _localCharacter.Velocity = Vector3.Zero;
+            _localCharacter.ResetLocomotionFromAuthoritative(_localCharacter.Grounded);
+        }
+
+        SendClientPingIfDue(nowSec);
+    }
+
+    private static float GetAgeMsOrNeg1(double nowSec, double lastSec)
+    {
+        return lastSec > 0.0 ? (float)((nowSec - lastSec) * 1000.0) : -1.0f;
+    }
+
+    private float GetRealtimeStallMs(double nowSec, float realDeltaSec)
+    {
+        double pollBaseSec = _lastPacketProcessedAtSec > 0.0 ? _lastPacketProcessedAtSec : _lastNetPollAtSec;
+        float pollAgeMs = GetAgeMsOrNeg1(nowSec, pollBaseSec);
+        float inputAgeMs = GetAgeMsOrNeg1(nowSec, _lastInputSendAtSec);
+        float snapshotAgeMs = GetAgeMsOrNeg1(nowSec, _lastSnapshotAppliedAtSec);
+        float frameGapMs = realDeltaSec > 0.0f ? realDeltaSec * 1000.0f : 0.0f;
+        float candidate = frameGapMs;
+        if (pollAgeMs > candidate)
+        {
+            candidate = pollAgeMs;
+        }
+        if (inputAgeMs > candidate)
+        {
+            candidate = inputAgeMs;
+        }
+        if (snapshotAgeMs > candidate)
+        {
+            candidate = snapshotAgeMs;
+        }
+
+        return candidate;
+    }
+
+    private void UpdateRealtimeStallWindow(double nowSec, float realtimeStallMs)
+    {
+        if (_realtimeStallWindowStartSec <= 0.0)
+        {
+            _realtimeStallWindowStartSec = nowSec;
+            _realtimeStallWindowMaxMs = realtimeStallMs;
+            _realtimeStallMs = realtimeStallMs;
+            return;
+        }
+
+        if (realtimeStallMs > _realtimeStallWindowMaxMs)
+        {
+            _realtimeStallWindowMaxMs = realtimeStallMs;
+        }
+
+        if ((nowSec - _realtimeStallWindowStartSec) >= 2.0)
+        {
+            _realtimeStallMs = _realtimeStallWindowMaxMs;
+            _realtimeStallWindowStartSec = nowSec;
+            _realtimeStallWindowMaxMs = realtimeStallMs;
+            return;
+        }
+
+        _realtimeStallMs = _realtimeStallWindowMaxMs;
+    }
+
+    private void SendClientPingIfDue(double nowSec)
+    {
+        if (_mode != RunMode.Client || nowSec < _nextPingTimeSec)
+        {
+            return;
+        }
+
+        _pingSeq++;
+        uint nowMs = (uint)Time.GetTicksMsec();
+        _pingSent[_pingSeq] = nowSec;
+        if (_pingSent.Count > NetConstants.MaxOutstandingPings)
+        {
+            ushort oldestSeq = 0;
+            bool found = false;
+            foreach (ushort seq in _pingSent.Keys)
+            {
+                oldestSeq = seq;
+                found = true;
+                break;
+            }
+
+            if (found)
+            {
+                _pingSent.Remove(oldestSeq);
+            }
+        }
+
+        NetCodec.WriteControlPing(_controlPacket, _pingSeq, nowMs);
+        SendPacket(1, NetChannels.Control, MultiplayerPeer.TransferModeEnum.Reliable, _controlPacket);
+        _nextPingTimeSec = nowSec + NetConstants.PingIntervalSec;
     }
 
     private void UpdateLocalWeaponView()
@@ -235,6 +360,7 @@ public partial class NetSession
         uint lastGeneratedSeq = 0;
         while (_client_send_tick <= desired_horizon_tick)
         {
+            ApplyQueuedTagStateEventsUpToTick(_client_send_tick, resimReplayed: false, _lastAuthoritativeServerTick);
             InputCommand command = BuildInputCommandForTick(_client_send_tick);
             _pendingInputs.Add(command);
             if (generatedCount == 0)
@@ -276,10 +402,12 @@ public partial class NetSession
             if (_mode == RunMode.ListenServer)
             {
                 HandleInputBundle(_localPeerId, _inputPacket);
+                _lastInputSendAtSec = Time.GetTicksMsec() / 1000.0;
             }
             else
             {
                 SendPacket(1, NetChannels.Input, MultiplayerPeer.TransferModeEnum.Unreliable, _inputPacket);
+                _lastInputSendAtSec = Time.GetTicksMsec() / 1000.0;
             }
 
             packetCount++;
@@ -427,6 +555,7 @@ public partial class NetSession
             GD.Print(
                 $"SnapshotRecvDiag: tick={serverTick} count={count} bytes={packet.Length} recv_gap_ms={recvGapMs:0.0} last_age_ms={lastSnapshotAgeMs:0.0}");
         }
+        DebugAssertSnapshotGap(localNowSec, recvGapMs, serverTick);
 
         uint snapshotServerTick = serverTick;
         for (int i = 0; i < count; i++)
@@ -434,7 +563,7 @@ public partial class NetSession
             PlayerStateSnapshot state = _snapshotDecodeScratch[i];
             if (state.PeerId == _localPeerId)
             {
-                ReconcileLocal(state);
+                ReconcileLocal(state, snapshotServerTick);
                 continue;
             }
 
@@ -482,12 +611,16 @@ public partial class NetSession
         };
     }
 
-    private void ReconcileLocal(in PlayerStateSnapshot snapshot)
+    private void ReconcileLocal(in PlayerStateSnapshot snapshot, uint snapshotServerTick)
     {
         if (_localCharacter is null)
         {
             return;
         }
+
+        _lastLocalAuthoritativeSnapshot = snapshot;
+        _lastLocalAuthoritativeServerTick = _lastAuthoritativeServerTick;
+        _hasLastLocalAuthoritativeSnapshot = true;
 
         _serverDroppedOldInputCount = snapshot.DroppedOldInputCount;
         _serverDroppedFutureInputCount = snapshot.DroppedFutureInputCount;
@@ -519,6 +652,14 @@ public partial class NetSession
 
         _lastSeenDroppedFutureInputCount = snapshot.DroppedFutureInputCount;
         _lastSeenDroppedFutureAtSec = snapshotNowSec;
+        DebugAssertMissingStreakGrowth(snapshotNowSec);
+
+        if (IsClientPredictionSuspended())
+        {
+            return;
+        }
+
+        _lastSnapshotAppliedAtSec = snapshotNowSec;
 
         Vector3 before = _localCharacter.GlobalPosition;
         _localCharacter.GlobalPosition = snapshot.Pos;
@@ -542,11 +683,13 @@ public partial class NetSession
             _lastAckedSeq = _nextInputSeq;
         }
         _pendingInputs.RemoveUpTo(_lastAckedSeq);
+        ApplyQueuedTagStateEventsUpToTick(snapshotServerTick, resimReplayed: true, snapshotServerTick);
 
         for (uint seq = _lastAckedSeq + 1; seq <= _nextInputSeq; seq++)
         {
             if (_pendingInputs.TryGet(seq, out InputCommand replay))
             {
+                ApplyQueuedTagStateEventsUpToTick(replay.InputTick, resimReplayed: true, snapshotServerTick);
                 _localCharacter.SetLook(replay.Yaw, replay.Pitch);
                 PlayerMotor.Simulate(_localCharacter, replay, _config);
             }
@@ -892,7 +1035,7 @@ public partial class NetSession
 
     private void TriggerClientResync(string reason, uint targetServerTick)
     {
-        if (_mode != RunMode.Client || _netClock is null)
+        if (_mode != RunMode.Client || _netClock is null || IsClientPredictionSuspended())
         {
             return;
         }
@@ -942,6 +1085,171 @@ public partial class NetSession
                 $"requestedTargetTick={requestedTargetTick} estNowTick={estNowTick} snapshotAgeSec={snapshotAgeSec:F3} " +
                 $"targetReplaced={replacedTarget} count={_resyncCount} suppressedDuringJoin={_resyncSuppressedDuringJoinCount}");
         }
+    }
+
+    private void PerformHardPredictionReset(string reason, long nowUsec, double nowSec)
+    {
+        if (_mode != RunMode.Client)
+        {
+            return;
+        }
+
+        uint targetServerTick = _lastLocalAuthoritativeServerTick > 0
+            ? _lastLocalAuthoritativeServerTick
+            : _lastAuthoritativeServerTick;
+        if (targetServerTick == 0)
+        {
+            targetServerTick = _server_sim_tick;
+        }
+
+        AdvanceInputEpoch(resetTickToServerEstimate: false);
+        _pendingInputs.Clear();
+        _clientRttOutlierStreak = 0;
+        _rttMs = 0.0f;
+        _jitterMs = 0.0f;
+        _pingSeq = 0;
+        _pingSent.Clear();
+        _sessionSnapshotJitterEwmaMs = 0.0f;
+        _lastSnapshotArrivalTimeSec = 0.0;
+        _hasSnapshotArrivalTimeSec = false;
+        _clientTickAccumulatorSec = 0.0;
+        _lastServerTickObsAtSec = nowSec;
+        _lastClientTickUsec = (ulong)nowUsec;
+        _lastNetPollAtSec = nowSec;
+        _lastPacketProcessedAtSec = nowSec;
+        _lastInputSendAtSec = nowSec;
+        _lastSnapshotAppliedAtSec = nowSec;
+        _nextClientRealtimeStallResyncAtSec = nowSec + 0.5;
+        _nextHardResyncAllowedAtSec = nowSec + 0.5;
+        _tickDriftGuardBreachCount = 0;
+        _netClock ??= new NetClock(_config.ServerTickRate);
+        _netClock.ForceResync(targetServerTick, nowUsec);
+        _client_est_server_tick = _netClock.GetEstimatedServerTick(nowUsec);
+        uint safetyTicks = (uint)Mathf.Max(0, ClientInputSafetyTicks);
+        uint delayTicks = (uint)GetClientInputDelayTicksForStamping();
+        uint restartTick = _client_est_server_tick + delayTicks + safetyTicks;
+        _client_send_tick = restartTick == 0 ? 1u : restartTick;
+
+        if (_localCharacter is not null && _hasLastLocalAuthoritativeSnapshot)
+        {
+            PlayerStateSnapshot authoritative = _lastLocalAuthoritativeSnapshot;
+            LocomotionNetState authoritativeNetState = new(
+                authoritative.LocoMode,
+                authoritative.LocoWallNormalX,
+                authoritative.LocoWallNormalZ,
+                authoritative.LocoWallRunTicksRemaining,
+                authoritative.LocoSlideTicksRemaining);
+            _localCharacter.GlobalPosition = authoritative.Pos;
+            _localCharacter.Velocity = authoritative.Vel;
+            _localCharacter.SetLocomotionState(
+                LocomotionNetStateCodec.UnpackToLocomotionState(authoritative.Grounded, authoritativeNetState));
+            _localCharacter.SetGroundedOverride(authoritative.Grounded);
+            _lookYaw = authoritative.Yaw;
+            _lookPitch = authoritative.Pitch;
+            _frozenYaw = authoritative.Yaw;
+            _frozenPitch = authoritative.Pitch;
+            _localCharacter.SetLook(_lookYaw, _lookPitch);
+            _localCharacter.ClearRenderCorrection();
+            _localCharacter.ClearViewCorrection();
+            _localCharacter.ResetInterpolationAfterSnap();
+        }
+        else
+        {
+            _frozenYaw = _lookYaw;
+            _frozenPitch = _lookPitch;
+        }
+
+        _hardResetCount++;
+        _lastHardResetReason = reason;
+
+        GD.Print(
+            $"HardReset: reason={reason} targetTick={targetServerTick} estTick={_client_est_server_tick} " +
+            $"restartSendTick={_client_send_tick} pendingCleared={_pendingInputs.Count == 0} " +
+            $"pingCacheCleared={_pingSent.Count == 0} hasAuthSnapshot={_hasLastLocalAuthoritativeSnapshot}");
+    }
+
+    private void PerformFocusInHardReset()
+    {
+        long nowUsec = GetLocalUsec();
+        double nowSec = nowUsec / 1_000_000.0;
+        PerformHardPredictionReset("focus_in", nowUsec, nowSec);
+        GD.Print("FocusIn: hard reset performed, buffers cleared");
+    }
+
+    private void DebugAssertSnapshotGap(double nowSec, float recvGapMs, uint serverTick)
+    {
+        if (!DebugRegressionAssertMode || !IsTransportConnected() || recvGapMs <= 250.0f)
+        {
+            return;
+        }
+
+        GD.PushWarning(
+            $"RegressionAssertFail: snapshot_recv_gap_ms={recvGapMs:0.0} (>250) " +
+            $"serverTick={serverTick} connected=1 t={nowSec:0.000}");
+    }
+
+    private void DebugAssertMissingStreakGrowth(double nowSec)
+    {
+        if (!DebugRegressionAssertMode || !IsTransportConnected())
+        {
+            return;
+        }
+
+        bool simulatedLossEnabled = _simEnabled && _simLoss > 0.001f;
+        if (simulatedLossEnabled)
+        {
+            _debugMissingWindowStartSec = 0.0;
+            return;
+        }
+
+        if (_debugMissingWindowStartSec <= 0.0)
+        {
+            _debugMissingWindowStartSec = nowSec;
+            _debugMissingWindowStartMax = _serverMissingInputStreakMax;
+            _debugMissingWindowStartDroppedOld = _serverDroppedOldInputCount;
+            _debugMissingWindowStartDroppedFuture = _serverDroppedFutureInputCount;
+            return;
+        }
+
+        bool windowExpired = (nowSec - _debugMissingWindowStartSec) > 10.0;
+        bool dropCountersChanged =
+            _serverDroppedOldInputCount != _debugMissingWindowStartDroppedOld ||
+            _serverDroppedFutureInputCount != _debugMissingWindowStartDroppedFuture;
+        if (windowExpired || dropCountersChanged || _serverMissingInputStreakMax < _debugMissingWindowStartMax)
+        {
+            _debugMissingWindowStartSec = nowSec;
+            _debugMissingWindowStartMax = _serverMissingInputStreakMax;
+            _debugMissingWindowStartDroppedOld = _serverDroppedOldInputCount;
+            _debugMissingWindowStartDroppedFuture = _serverDroppedFutureInputCount;
+            return;
+        }
+
+        uint growth = _serverMissingInputStreakMax - _debugMissingWindowStartMax;
+        if (growth <= 10)
+        {
+            return;
+        }
+
+        GD.PushWarning(
+            $"RegressionAssertFail: missingStreakMax_growth={growth} (>10) window_sec={nowSec - _debugMissingWindowStartSec:0.00} " +
+            $"dropOldDelta=0 dropFutureDelta=0 simLossPct={_simLoss:0.###}");
+
+        _debugMissingWindowStartSec = nowSec;
+        _debugMissingWindowStartMax = _serverMissingInputStreakMax;
+        _debugMissingWindowStartDroppedOld = _serverDroppedOldInputCount;
+        _debugMissingWindowStartDroppedFuture = _serverDroppedFutureInputCount;
+    }
+
+    private void DebugRegressionLogResyncIncrement(double nowSec)
+    {
+        if (!DebugRegressionAssertMode || _resyncCount <= _debugLastLoggedResyncCount)
+        {
+            return;
+        }
+
+        GD.Print(
+            $"RegressionDiag: resync_count_increment old={_debugLastLoggedResyncCount} new={_resyncCount} t={nowSec:0.000}");
+        _debugLastLoggedResyncCount = _resyncCount;
     }
 
     private void UpdateAppliedInputDelayTicks()

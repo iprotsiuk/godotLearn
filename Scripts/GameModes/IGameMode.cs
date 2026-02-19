@@ -1,4 +1,5 @@
 // Scripts/GameModes/IGameMode.cs
+using Godot;
 using NetRunnerSlice.Match;
 using NetRunnerSlice.Net;
 using NetRunnerSlice.Player;
@@ -30,4 +31,14 @@ public interface IGameMode
         uint tick);
 
     void ClientOnTagState(MatchManager matchManager, NetSession session, TagState state, bool isFull);
+
+    bool ServerTryHandleFreezeGunShot(
+        MatchManager matchManager,
+        NetSession session,
+        int shooterPeerId,
+        Vector3 origin,
+        Vector3 direction,
+        float maxDistance,
+        uint tick,
+        out Vector3 hitPoint);
 }

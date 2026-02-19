@@ -63,8 +63,8 @@ public partial class PickupItem : Area3D
 	public void SetActive(bool active)
 	{
 		Visible = active;
-		Monitoring = active;
-		Monitorable = active;
+		SetDeferred("monitoring", active);
+		SetDeferred("monitorable", active);
 		SetCollisionShapesActive(this, active);
 	}
 
@@ -140,7 +140,7 @@ public partial class PickupItem : Area3D
 		{
 			if (child is CollisionShape3D collisionShape)
 			{
-				collisionShape.Disabled = !active;
+				collisionShape.SetDeferred("disabled", !active);
 			}
 
 			SetCollisionShapesActive(child, active);

@@ -1,4 +1,5 @@
 // Scripts/GameModes/FreeRunMode.cs
+using Godot;
 using NetRunnerSlice.Match;
 using NetRunnerSlice.Net;
 using NetRunnerSlice.Player;
@@ -24,7 +25,10 @@ public sealed class FreeRunMode : IGameMode
         {
             RoundIndex = matchManager.RoundIndex,
             ItPeerId = -1,
-            ItCooldownEndTick = 0
+            ItCooldownEndTick = 0,
+            TagAppliedTick = session.Metrics.ServerSimTick,
+            TaggerPeerId = -1,
+            TaggedPeerId = -1
         }, broadcast: true);
     }
 
@@ -52,5 +56,19 @@ public sealed class FreeRunMode : IGameMode
 
     public void ClientOnTagState(MatchManager matchManager, NetSession session, TagState state, bool isFull)
     {
+    }
+
+    public bool ServerTryHandleFreezeGunShot(
+        MatchManager matchManager,
+        NetSession session,
+        int shooterPeerId,
+        Vector3 origin,
+        Vector3 direction,
+        float maxDistance,
+        uint tick,
+        out Vector3 hitPoint)
+    {
+        hitPoint = origin + (direction * maxDistance);
+        return false;
     }
 }

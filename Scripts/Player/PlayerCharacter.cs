@@ -395,13 +395,49 @@ public partial class PlayerCharacter : CharacterBody3D
 	{
 		if (node is GeometryInstance3D geometry)
 		{
-			StandardMaterial3D tintMaterial = new()
+			if (geometry.MaterialOverride is BaseMaterial3D overrideMaterial)
 			{
-				AlbedoColor = tint,
-				Roughness = 0.6f,
-				Metallic = 0.0f
-			};
-			geometry.MaterialOverride = tintMaterial;
+				BaseMaterial3D cloned = (BaseMaterial3D)overrideMaterial.Duplicate();
+				cloned.AlbedoColor *= tint;
+				geometry.MaterialOverride = cloned;
+			}
+			else if (geometry is MeshInstance3D meshInstance && meshInstance.Mesh is Mesh mesh)
+			{
+				bool appliedFromSurface = false;
+				int surfaceCount = mesh.GetSurfaceCount();
+				for (int surface = 0; surface < surfaceCount; surface++)
+				{
+					Material? source = meshInstance.GetSurfaceOverrideMaterial(surface) ?? mesh.SurfaceGetMaterial(surface);
+					if (source is not BaseMaterial3D baseMaterial)
+					{
+						continue;
+					}
+
+					BaseMaterial3D cloned = (BaseMaterial3D)baseMaterial.Duplicate();
+					cloned.AlbedoColor *= tint;
+					meshInstance.SetSurfaceOverrideMaterial(surface, cloned);
+					appliedFromSurface = true;
+				}
+
+				if (!appliedFromSurface)
+				{
+					geometry.MaterialOverride = new StandardMaterial3D
+					{
+						AlbedoColor = tint,
+						Roughness = 0.6f,
+						Metallic = 0.0f
+					};
+				}
+			}
+			else
+			{
+				geometry.MaterialOverride = new StandardMaterial3D
+				{
+					AlbedoColor = tint,
+					Roughness = 0.6f,
+					Metallic = 0.0f
+				};
+			}
 		}
 
 		foreach (Node child in node.GetChildren())

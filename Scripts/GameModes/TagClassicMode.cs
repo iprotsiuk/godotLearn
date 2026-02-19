@@ -4,6 +4,7 @@ using Godot;
 using NetRunnerSlice.Match;
 using NetRunnerSlice.Net;
 using NetRunnerSlice.Player;
+using NetRunnerSlice.Rendering;
 
 namespace NetRunnerSlice.GameModes;
 
@@ -30,7 +31,7 @@ public sealed class TagClassicMode : IGameMode
         "res://addons/guns/drone.glb",
         "res://addons/drone.glb"
     };
-    private const uint DronePathRecalcTicks = 1;
+    private const uint DronePathRecalcTicks = 3;
     private const int DroneWaypointLookAheadPoints = 6;
 
     private sealed class DroneAgent
@@ -49,6 +50,8 @@ public sealed class TagClassicMode : IGameMode
     private readonly RandomNumberGenerator _rng = new();
     private readonly Dictionary<int, DroneAgent> _dronesByRunner = new();
     private readonly HashSet<int> _runnerScratch = new();
+    private readonly List<int> _knownPeersScratch = new();
+    private readonly List<int> _dronesToRemoveScratch = new();
 
     private int _itPeerId = -1;
     private uint _itTagCooldownUntilTick;
@@ -92,7 +95,10 @@ public sealed class TagClassicMode : IGameMode
             {
                 RoundIndex = roundIndex,
                 ItPeerId = _itPeerId,
-                ItCooldownEndTick = _itTagCooldownUntilTick
+                ItCooldownEndTick = _itTagCooldownUntilTick,
+                TagAppliedTick = session.Metrics.ServerSimTick,
+                TaggerPeerId = -1,
+                TaggedPeerId = _itPeerId
             }, broadcast: true);
             return;
         }
@@ -115,7 +121,10 @@ public sealed class TagClassicMode : IGameMode
         {
             RoundIndex = roundIndex,
             ItPeerId = _itPeerId,
-            ItCooldownEndTick = _itTagCooldownUntilTick
+            ItCooldownEndTick = _itTagCooldownUntilTick,
+            TagAppliedTick = session.Metrics.ServerSimTick,
+            TaggerPeerId = -1,
+            TaggedPeerId = _itPeerId
         }, broadcast: true);
     }
 
@@ -269,6 +278,63 @@ public sealed class TagClassicMode : IGameMode
         }
     }
 
+    public bool ServerTryHandleFreezeGunShot(
+        MatchManager matchManager,
+        NetSession session,
+        int shooterPeerId,
+        Vector3 origin,
+        Vector3 direction,
+        float maxDistance,
+        uint tick,
+        out Vector3 hitPoint)
+    {
+        hitPoint = origin + (direction * maxDistance);
+        if (!session.IsServer || !DronesEnabled || _dronesByRunner.Count == 0)
+        {
+            return false;
+        }
+
+        float bestDistance = maxDistance + 0.001f;
+        DroneAgent? bestDrone = null;
+        foreach (DroneAgent drone in _dronesByRunner.Values)
+        {
+            if (drone.PendingRespawn || !drone.Body.Visible || drone.Body.CollisionLayer == 0)
+            {
+                continue;
+            }
+
+            Vector3 center = drone.Body.GlobalPosition;
+            if (!TryRaySphereHit(origin, direction, center, radius: 0.42f, maxDistance, out float hitDistance))
+            {
+                continue;
+            }
+
+            if (hitDistance >= bestDistance)
+            {
+                continue;
+            }
+
+            bestDistance = hitDistance;
+            bestDrone = drone;
+        }
+
+        if (bestDrone is null)
+        {
+            return false;
+        }
+
+        hitPoint = origin + (direction * bestDistance);
+        session.ServerApplyFreeze(bestDrone.TargetPeerId, DroneFreezeDurationSec);
+        BeginDroneRespawnCooldown(bestDrone, tick, session.TickRate);
+        session.ServerBroadcastTagDroneState(
+            bestDrone.TargetPeerId,
+            tick,
+            bestDrone.Body.GlobalPosition,
+            bestDrone.Body.Velocity,
+            visible: false);
+        return true;
+    }
+
     private bool HasValidIt(MatchManager matchManager)
     {
         if (matchManager.RoundParticipants.Count < 2)
@@ -353,12 +419,19 @@ public sealed class TagClassicMode : IGameMode
 
     private void ApplyTagTransfer(NetSession session, int taggedPeerId, uint tick)
     {
+        int previousItPeerId = _itPeerId;
         _itPeerId = taggedPeerId;
         session.RespawnServerPeerAtSpawn(taggedPeerId);
 
         uint cooldownTicks = (uint)(3 * session.TickRate);
         _itTagCooldownUntilTick = tick + cooldownTicks;
-        session.SetCurrentTagStateDelta(_itPeerId, _itTagCooldownUntilTick, broadcast: true);
+        session.SetCurrentTagStateDelta(
+            _itPeerId,
+            _itTagCooldownUntilTick,
+            tick,
+            previousItPeerId,
+            taggedPeerId,
+            broadcast: true);
     }
 
     private void BuildRunnerSetFromParticipants(MatchManager matchManager)
@@ -376,8 +449,11 @@ public sealed class TagClassicMode : IGameMode
     private void BuildRunnerSetFromKnownPeers(NetSession session, int itPeerId)
     {
         _runnerScratch.Clear();
-        foreach (int peerId in session.GetKnownPeerIds())
+        _knownPeersScratch.Clear();
+        session.FillKnownPeerIds(_knownPeersScratch);
+        for (int i = 0; i < _knownPeersScratch.Count; i++)
         {
+            int peerId = _knownPeersScratch[i];
             if (peerId > 0 && peerId != itPeerId)
             {
                 _runnerScratch.Add(peerId);
@@ -458,7 +534,7 @@ public sealed class TagClassicMode : IGameMode
 
     private void DespawnDronesForInvalidRunners()
     {
-        List<int> toRemove = new();
+        _dronesToRemoveScratch.Clear();
         foreach (KeyValuePair<int, DroneAgent> pair in _dronesByRunner)
         {
             if (_runnerScratch.Contains(pair.Key))
@@ -467,11 +543,12 @@ public sealed class TagClassicMode : IGameMode
             }
 
             DespawnDrone(pair.Value);
-            toRemove.Add(pair.Key);
+            _dronesToRemoveScratch.Add(pair.Key);
         }
 
-        foreach (int peerId in toRemove)
+        for (int i = 0; i < _dronesToRemoveScratch.Count; i++)
         {
+            int peerId = _dronesToRemoveScratch[i];
             _dronesByRunner.Remove(peerId);
         }
     }
@@ -776,6 +853,45 @@ public sealed class TagClassicMode : IGameMode
         return horizontalDistance <= DroneCatchRangeMeters && verticalDistance <= 1.6f;
     }
 
+    private static bool TryRaySphereHit(
+        Vector3 rayOrigin,
+        Vector3 rayDirection,
+        Vector3 sphereCenter,
+        float radius,
+        float maxDistance,
+        out float hitDistance)
+    {
+        hitDistance = 0.0f;
+
+        Vector3 m = rayOrigin - sphereCenter;
+        float b = m.Dot(rayDirection);
+        float c = m.Dot(m) - (radius * radius);
+        if (c > 0.0f && b > 0.0f)
+        {
+            return false;
+        }
+
+        float discriminant = (b * b) - c;
+        if (discriminant < 0.0f)
+        {
+            return false;
+        }
+
+        float t = -b - Mathf.Sqrt(discriminant);
+        if (t < 0.0f)
+        {
+            t = 0.0f;
+        }
+
+        if (t > maxDistance)
+        {
+            return false;
+        }
+
+        hitDistance = t;
+        return true;
+    }
+
     private static bool TryGetObstacleHit(
         PhysicsDirectSpaceState3D space,
         DroneAgent drone,
@@ -944,6 +1060,7 @@ public sealed class TagClassicMode : IGameMode
         }
 
         visualRoot.Scale = new Vector3(0.2f, 0.2f, 0.2f);
+        RenderCompat.ForceOpaqueAndCheap(visualRoot);
         return visualRoot;
     }
 }

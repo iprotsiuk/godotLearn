@@ -1,5 +1,7 @@
 // Scripts/Net/NetSession.cs
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Godot;
 using NetRunnerSlice.GameModes;
 using NetRunnerSlice.Items;
@@ -20,6 +22,8 @@ public partial class NetSession : Node
     private const float WeaponOriginMaxOffset = 1.5f;
     private const int MaxPlayerHealth = 100;
     private const int WeaponHitDamage = 19;
+    private const int SpecialHitPeerId = -2;
+    private const float SimNetHitchThresholdMs = 45.0f;
 
     private enum RunMode
     {
@@ -27,6 +31,12 @@ public partial class NetSession : Node
         ListenServer,
         DedicatedServer,
         Client
+    }
+
+    private enum ClientFocusMode
+    {
+        Focused,
+        Unfocused
     }
 
     private sealed class ServerPlayer
@@ -81,6 +91,12 @@ public partial class NetSession : Node
         public Vector3 Position;
     }
 
+    private struct PendingTagStateEvent
+    {
+        public TagState State;
+        public bool IsFull;
+    }
+
     private readonly uint[] _rewindTicks = new uint[RewindHistoryTicks];
     private readonly int[] _rewindCounts = new int[RewindHistoryTicks];
     private readonly RewindSample[,] _rewindSamples = new RewindSample[RewindHistoryTicks, NetConstants.MaxPlayers];
@@ -98,6 +114,7 @@ public partial class NetSession : Node
     private readonly Dictionary<int, uint> _pickupRespawnTickById = new();
     private readonly Dictionary<int, uint> _freezeUntilTickByPeer = new();
     private readonly Dictionary<int, TagDroneState> _clientTagDroneStatesByRunner = new();
+    private readonly SortedDictionary<uint, PendingTagStateEvent> _pendingTagStateEventsByTick = new();
     private readonly List<int> _pickupRespawnReadyScratch = new();
     private readonly byte[] _inputPacket = new byte[NetConstants.InputPacketBytes];
     private readonly byte[] _snapshotPacket = new byte[NetConstants.SnapshotPacketBytes];
@@ -166,10 +183,29 @@ public partial class NetSession : Node
     private readonly Dictionary<ushort, double> _pingSent = new();
     private double _nextServerDiagnosticsLogAtSec;
     private bool _hasFocus = true;
+    private ClientFocusMode _clientFocusMode = ClientFocusMode.Focused;
     private bool _focusOutPending;
     private bool _focusOutResetApplied;
     private double _focusOutStartedAtSec;
+    private double _lastNetPollAtSec;
+    private double _lastPacketProcessedAtSec;
+    private double _lastInputSendAtSec;
+    private double _lastSnapshotAppliedAtSec;
+    private int _savedMaxFpsBeforeUnfocus = -1;
+    private double _clientTickAccumulatorSec;
     private double _nextFrameHitchLogAtSec;
+    private bool _hasLastLocalAuthoritativeSnapshot;
+    private PlayerStateSnapshot _lastLocalAuthoritativeSnapshot;
+    private uint _lastLocalAuthoritativeServerTick;
+    private double _realtimeStallWindowStartSec;
+    private float _realtimeStallWindowMaxMs;
+    private float _realtimeStallMs;
+    private uint _hardResetCount;
+    private string _lastHardResetReason = "none";
+    private uint _lastAppliedTagEventTick;
+    private bool _tagProcessedDiagThisFrame;
+    private uint _tagProcessedDiagTick;
+    private int _tagProcessedDiagCountThisFrame;
     private InputHistoryBuffer _pendingInputs = new();
     private uint _nextInputSeq;
     private uint _lastAckedSeq;
@@ -226,7 +262,10 @@ public partial class NetSession : Node
     {
         RoundIndex = 0,
         ItPeerId = -1,
-        ItCooldownEndTick = 0
+        ItCooldownEndTick = 0,
+        TagAppliedTick = 0,
+        TaggerPeerId = -1,
+        TaggedPeerId = -1
     };
     public int LocalPeerId => _localPeerId;
     public event System.Action<MatchConfig>? MatchConfigReceived;
@@ -243,7 +282,16 @@ public partial class NetSession : Node
     /// </summary>
     public IReadOnlyDictionary<int, PlayerCharacter> ServerPlayers => _serverCharactersByPeer;
     public IReadOnlyDictionary<int, (byte ItemId, byte Charges, uint CooldownEndTick)> ClientInventory => _clientInventory;
+    public int ServerPeerCount => _serverPlayers.Count;
     public System.Func<int, bool>? ServerCanPickupItem;
+    public delegate bool ServerFreezeGunShotHandler(
+        int shooterPeerId,
+        Vector3 origin,
+        Vector3 direction,
+        float maxDistance,
+        uint tick,
+        out Vector3 hitPoint);
+    public ServerFreezeGunShotHandler? ServerTryHandleFreezeGunShot;
 
     public int[] GetServerPeerIds()
     {
@@ -279,6 +327,35 @@ public partial class NetSession : Node
         }
 
         return peers.ToArray();
+    }
+
+    public void FillKnownPeerIds(List<int> peers)
+    {
+        peers.Clear();
+        if (IsServer)
+        {
+            foreach (int peerId in _serverPlayers.Keys)
+            {
+                peers.Add(peerId);
+            }
+
+            return;
+        }
+
+        if (_localPeerId > 0)
+        {
+            peers.Add(_localPeerId);
+        }
+
+        foreach (int peerId in _remotePlayers.Keys)
+        {
+            if (peerId == _localPeerId)
+            {
+                continue;
+            }
+
+            peers.Add(peerId);
+        }
     }
 
     /// <summary>
@@ -592,6 +669,12 @@ public partial class NetSession : Node
     public void Initialize(NetworkConfig config, Node3D playerRoot)
     {
         _config = config;
+        ProcessMode = ShouldKeepNetworkingWhenUnfocused() ? ProcessModeEnum.Always : ProcessModeEnum.Inherit;
+        if (!ShouldKeepNetworkingWhenUnfocused())
+        {
+            RestoreUnfocusedNetworkingPolicyOverrides();
+        }
+
         _playerRoot = playerRoot;
         _playerCharacterScene = GD.Load<PackedScene>(PlayerCharacterScenePath);
         _snapshotEveryTicks = Mathf.Max(1, _config.ServerTickRate / Mathf.Max(1, _config.SnapshotRate));
@@ -629,6 +712,7 @@ public partial class NetSession : Node
     public override void _Ready()
     {
         AddToGroup("net_session");
+        ProcessMode = ShouldKeepNetworkingWhenUnfocused() ? ProcessModeEnum.Always : ProcessModeEnum.Inherit;
         // Godot polls MultiplayerAPI during process_frame by default; we poll manually in physics for fixed-step netcode.
         GetTree().SetMultiplayerPollEnabled(false);
         Multiplayer.PeerConnected += OnPeerConnected;
@@ -649,10 +733,18 @@ public partial class NetSession : Node
 
     public override void _PhysicsProcess(double delta)
     {
+        long simNetStartStamp = Stopwatch.GetTimestamp();
+        int gc0Before = GC.CollectionCount(0);
+        int gc1Before = GC.CollectionCount(1);
+        int gc2Before = GC.CollectionCount(2);
+        long memBeforeBytes = GC.GetTotalMemory(false);
+
+        ApplyUnfocusedNetworkingPolicyIfNeeded();
         LogFrameHitchIfNeeded("physics", delta, _config.PhysicsHitchThresholdMs);
         if (Multiplayer.MultiplayerPeer is not null)
         {
             Multiplayer.Poll();
+            _lastNetPollAtSec = Time.GetTicksMsec() / 1000.0;
         }
         if (_mode == RunMode.None)
         {
@@ -661,9 +753,23 @@ public partial class NetSession : Node
 
         if (IsClient)
         {
-            // Sample gameplay movement input in the same fixed-step loop used for prediction/simulation.
-            CaptureInputState();
-            TickClient((float)delta);
+            // Drive client prediction/input generation on a fixed client-tick cadence, independent of render pacing.
+            float clientStepSec = 1.0f / Mathf.Max(1, _config.ClientTickRate);
+            _clientTickAccumulatorSec += delta;
+            if (_clientTickAccumulatorSec > 0.5)
+            {
+                _clientTickAccumulatorSec = 0.5;
+            }
+
+            int maxCatchUpSteps = Mathf.Max(1, Mathf.CeilToInt(0.5f / clientStepSec));
+            int steps = 0;
+            while (_clientTickAccumulatorSec >= clientStepSec && steps < maxCatchUpSteps)
+            {
+                CaptureInputState();
+                TickClient(clientStepSec);
+                _clientTickAccumulatorSec -= clientStepSec;
+                steps++;
+            }
         }
 
         if (IsServer)
@@ -673,6 +779,25 @@ public partial class NetSession : Node
 
         _simulator?.Flush(Time.GetTicksMsec() / 1000.0);
         UpdateMetrics();
+
+        long simNetEndStamp = Stopwatch.GetTimestamp();
+        float simNetDtMs = (float)((simNetEndStamp - simNetStartStamp) * 1000.0 / Stopwatch.Frequency);
+        int gc0Delta = GC.CollectionCount(0) - gc0Before;
+        int gc1Delta = GC.CollectionCount(1) - gc1Before;
+        int gc2Delta = GC.CollectionCount(2) - gc2Before;
+        long memDeltaKb = (GC.GetTotalMemory(false) - memBeforeBytes) / 1024;
+
+        if (simNetDtMs > SimNetHitchThresholdMs || _tagProcessedDiagThisFrame)
+        {
+            GD.Print(
+                $"SimNetDiag: dt_ms={simNetDtMs:0.0} gc_delta_counts={gc0Delta}/{gc1Delta}/{gc2Delta} " +
+                $"mem_delta_kb={memDeltaKb} tag_processed={(_tagProcessedDiagThisFrame ? 1 : 0)} " +
+                $"tag_tick={_tagProcessedDiagTick} tag_count={_tagProcessedDiagCountThisFrame}");
+        }
+
+        _tagProcessedDiagThisFrame = false;
+        _tagProcessedDiagTick = 0;
+        _tagProcessedDiagCountThisFrame = 0;
     }
 
     public override void _Process(double delta)
@@ -690,6 +815,12 @@ public partial class NetSession : Node
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (@event.IsActionPressed("debug_focus_harness_toggle"))
+        {
+            ToggleDebugFocusHarness();
+            return;
+        }
+
         if (_localCharacter is null || IsFocusInputSuppressed())
         {
             return;
@@ -742,6 +873,53 @@ public partial class NetSession : Node
     private bool IsFocusInputSuppressed()
     {
         return !_hasFocus && !_config.AllowInputWhenUnfocused;
+    }
+
+    private bool ShouldKeepNetworkingWhenUnfocused()
+    {
+        return _config.KeepNetworkingWhenUnfocused;
+    }
+
+    private void ApplyUnfocusedNetworkingPolicyIfNeeded()
+    {
+        if (!ShouldKeepNetworkingWhenUnfocused() || _mode != RunMode.Client || !IsTransportConnected())
+        {
+            RestoreUnfocusedNetworkingPolicyOverrides();
+            return;
+        }
+
+        if (OS.LowProcessorUsageMode)
+        {
+            OS.LowProcessorUsageMode = false;
+        }
+
+        if (_hasFocus)
+        {
+            RestoreUnfocusedNetworkingPolicyOverrides();
+            return;
+        }
+
+        int minUnfocusedFps = Mathf.Max(1, _config.ClientTickRate);
+        int currentMaxFps = Engine.MaxFps;
+        if (currentMaxFps > 0 && currentMaxFps < minUnfocusedFps)
+        {
+            if (_savedMaxFpsBeforeUnfocus < 0)
+            {
+                _savedMaxFpsBeforeUnfocus = currentMaxFps;
+            }
+
+            Engine.MaxFps = minUnfocusedFps;
+        }
+    }
+
+    private void RestoreUnfocusedNetworkingPolicyOverrides()
+    {
+        if (_savedMaxFpsBeforeUnfocus > 0 && Engine.MaxFps != _savedMaxFpsBeforeUnfocus)
+        {
+            Engine.MaxFps = _savedMaxFpsBeforeUnfocus;
+        }
+
+        _savedMaxFpsBeforeUnfocus = -1;
     }
 
     private void LogFrameHitchIfNeeded(string phase, double deltaSec, float thresholdMs)
@@ -854,7 +1032,9 @@ public partial class NetSession : Node
 
     public void StopSession()
     {
+        RestoreUnfocusedNetworkingPolicyOverrides();
         _mode = RunMode.None;
+        _clientTickAccumulatorSec = 0.0;
         _server_sim_tick = 0;
         _lastAuthoritativeServerTick = 0;
         _client_est_server_tick = 0;
@@ -950,6 +1130,8 @@ public partial class NetSession : Node
         _pickupRespawnTickById.Clear();
         _freezeUntilTickByPeer.Clear();
         _clientTagDroneStatesByRunner.Clear();
+        _pendingTagStateEventsByTick.Clear();
+        _lastAppliedTagEventTick = 0;
         _localFreezeActive = false;
         _localCharacter?.QueueFree();
         _localCharacter = null;
@@ -965,7 +1147,10 @@ public partial class NetSession : Node
         {
             RoundIndex = 0,
             ItPeerId = -1,
-            ItCooldownEndTick = 0
+            ItCooldownEndTick = 0,
+            TagAppliedTick = 0,
+            TaggerPeerId = -1,
+            TaggedPeerId = -1
         };
         _simulator = null;
         _pingSent.Clear();
@@ -973,6 +1158,29 @@ public partial class NetSession : Node
         _focusOutPending = false;
         _focusOutResetApplied = false;
         _focusOutStartedAtSec = 0.0;
+        _debugFocusHarnessActive = false;
+        _debugFocusHarnessUntilSec = 0.0;
+        _clientFocusMode = ClientFocusMode.Focused;
+        _lastNetPollAtSec = 0.0;
+        _lastPacketProcessedAtSec = 0.0;
+        _lastInputSendAtSec = 0.0;
+        _lastSnapshotAppliedAtSec = 0.0;
+        _hasLastLocalAuthoritativeSnapshot = false;
+        _lastLocalAuthoritativeSnapshot = default;
+        _lastLocalAuthoritativeServerTick = 0;
+        _realtimeStallWindowStartSec = 0.0;
+        _realtimeStallWindowMaxMs = 0.0f;
+        _realtimeStallMs = 0.0f;
+        _hardResetCount = 0;
+        _lastHardResetReason = "none";
+        _debugLastLoggedResyncCount = 0;
+        _debugMissingWindowStartSec = 0.0;
+        _debugMissingWindowStartMax = 0;
+        _debugMissingWindowStartDroppedOld = 0;
+        _debugMissingWindowStartDroppedFuture = 0;
+        _tagProcessedDiagThisFrame = false;
+        _tagProcessedDiagTick = 0;
+        _tagProcessedDiagCountThisFrame = 0;
 
         if (Multiplayer.MultiplayerPeer is not null)
         {
@@ -1090,6 +1298,83 @@ public partial class NetSession : Node
     public void ClearClientTagDroneStates()
     {
         _clientTagDroneStatesByRunner.Clear();
+    }
+
+    private void MarkTagProcessedForDiag(uint tagTick)
+    {
+        _tagProcessedDiagThisFrame = true;
+        _tagProcessedDiagTick = tagTick;
+        _tagProcessedDiagCountThisFrame++;
+    }
+
+    private void QueueClientTagStateEvent(in TagState state, bool isFull)
+    {
+        if (_mode != RunMode.Client)
+        {
+            return;
+        }
+
+        uint tagTick = state.TagAppliedTick;
+        if (tagTick == 0)
+        {
+            tagTick = _lastAuthoritativeServerTick;
+        }
+
+        TagState queuedState = state;
+        queuedState.TagAppliedTick = tagTick;
+        _pendingTagStateEventsByTick[tagTick] = new PendingTagStateEvent
+        {
+            State = queuedState,
+            IsFull = isFull
+        };
+    }
+
+    private static bool TryPeekFirstPendingTagTick(SortedDictionary<uint, PendingTagStateEvent> eventsByTick, out uint tick)
+    {
+        foreach (uint key in eventsByTick.Keys)
+        {
+            tick = key;
+            return true;
+        }
+
+        tick = 0;
+        return false;
+    }
+
+    private void ApplyQueuedTagStateEventsUpToTick(uint simTick, bool resimReplayed, uint serverTickForDiag)
+    {
+        while (TryPeekFirstPendingTagTick(_pendingTagStateEventsByTick, out uint nextTick) && nextTick <= simTick)
+        {
+            PendingTagStateEvent pending = _pendingTagStateEventsByTick[nextTick];
+            _pendingTagStateEventsByTick.Remove(nextTick);
+            ApplyClientTagStateEvent(pending.State, pending.IsFull, simTick, resimReplayed, serverTickForDiag);
+        }
+    }
+
+    private void ApplyClientTagStateEvent(in TagState state, bool isFull, uint localSimTick, bool resimReplayed, uint serverTickForDiag)
+    {
+        bool staleRound = state.RoundIndex < CurrentTagState.RoundIndex;
+        bool staleTick = state.TagAppliedTick < _lastAppliedTagEventTick;
+        if (staleRound || staleTick)
+        {
+            return;
+        }
+
+        CurrentTagState = state;
+        _lastAppliedTagEventTick = state.TagAppliedTick;
+        MarkTagProcessedForDiag(state.TagAppliedTick);
+        if (isFull)
+        {
+            TagStateFullReceived?.Invoke(state);
+        }
+        else
+        {
+            TagStateDeltaReceived?.Invoke(state);
+        }
+
+        GD.Print(
+            $"TagApplyDiag: server_tick={serverTickForDiag} tag_tick={state.TagAppliedTick} " +
+            $"applied_at_local_tick={localSimTick} resim_replayed={(resimReplayed ? "true" : "false")}");
     }
 
     private bool IsLocalWeaponCoolingDownAtTick(uint tick)
