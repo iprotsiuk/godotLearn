@@ -17,7 +17,8 @@ public sealed class TagClassicMode : IGameMode
     private const float DroneSpawnDelaySec = 15.0f;
     private const float DroneRespawnDelaySec = 5.0f;
     private const float DroneSpeedRatio = 0.30f;
-    private const float DroneSteerLerpPerTick = 0.22f;
+    private const float DroneAccelXZ = 60.0f;
+    private const float DroneAccelY = 80.0f;
     private const float DroneVerticalGain = 2.0f;
     private const float DroneFreezeDurationSec = 2.0f;
     private const float DroneCatchRangeMeters = 1.35f;
@@ -29,17 +30,8 @@ public sealed class TagClassicMode : IGameMode
         "res://addons/guns/drone.glb",
         "res://addons/drone.glb"
     };
-    private const uint DronePathRecalcTicks = 20;
-    private const float DroneGridCellMeters = 1.0f;
-    private const int DronePathPaddingCells = 18;
-    private const int DronePathMaxExpandedNodes = 1200;
-
-    private static readonly Vector2I[] DroneNeighborOffsets =
-    {
-        new(-1, -1), new(0, -1), new(1, -1),
-        new(-1, 0),                new(1, 0),
-        new(-1, 1),  new(0, 1),   new(1, 1)
-    };
+    private const uint DronePathRecalcTicks = 1;
+    private const int DroneWaypointLookAheadPoints = 6;
 
     private sealed class DroneAgent
     {
@@ -50,6 +42,8 @@ public sealed class TagClassicMode : IGameMode
         public uint NextPathRecalcTick;
         public bool PendingRespawn;
         public uint RespawnAtTick;
+        public Vector3 LastPos;
+        public int NoProgressTicks;
     }
 
     private readonly RandomNumberGenerator _rng = new();
@@ -456,7 +450,9 @@ public sealed class TagClassicMode : IGameMode
             TargetPeerId = runnerPeerId,
             Body = body,
             NextPathRecalcTick = (uint)_rng.RandiRange(0, (int)DronePathRecalcTicks - 1),
-            PathIndex = 0
+            PathIndex = 0,
+            LastPos = body.GlobalPosition,
+            NoProgressTicks = 0
         };
     }
 
@@ -506,6 +502,7 @@ public sealed class TagClassicMode : IGameMode
         }
 
         float speed = Mathf.Max(0.05f, session.MoveSpeed * DroneSpeedRatio);
+        float dt = 1.0f / Mathf.Max(1, session.TickRate);
         foreach (DroneAgent drone in _dronesByRunner.Values)
         {
             if (drone.PendingRespawn)
@@ -540,21 +537,49 @@ public sealed class TagClassicMode : IGameMode
             Vector3 waypoint = ResolveDroneWaypoint(drone, targetCharacter, targetPos);
             Vector3 toWaypoint = waypoint - drone.Body.GlobalPosition;
             Vector2 toWaypointXZ = new(toWaypoint.X, toWaypoint.Z);
-            Vector3 desiredVelocity = Vector3.Zero;
+            Vector2 desiredXZ = Vector2.Zero;
             if (toWaypointXZ.LengthSquared() > 0.000001f)
             {
-                Vector2 desiredXZ = toWaypointXZ.Normalized() * speed;
-                desiredVelocity.X = desiredXZ.X;
-                desiredVelocity.Z = desiredXZ.Y;
+                desiredXZ = toWaypointXZ.Normalized() * speed;
+            }
+
+            Vector2 currentXZ = new(drone.Body.Velocity.X, drone.Body.Velocity.Z);
+            Vector2 steeredXZ = currentXZ.MoveToward(desiredXZ, DroneAccelXZ * dt);
+            if (steeredXZ.LengthSquared() > (speed * speed))
+            {
+                steeredXZ = steeredXZ.Normalized() * speed;
             }
 
             // Keep vertical movement bounded to the same speed budget as horizontal chase speed.
             float maxVerticalSpeed = speed;
             float verticalError = desiredY - drone.Body.GlobalPosition.Y;
-            desiredVelocity.Y = Mathf.Clamp(verticalError * DroneVerticalGain, -maxVerticalSpeed, maxVerticalSpeed);
-            drone.Body.Velocity = drone.Body.Velocity.Lerp(desiredVelocity, DroneSteerLerpPerTick);
+            float desiredVerticalVelocity = Mathf.Clamp(verticalError * DroneVerticalGain, -maxVerticalSpeed, maxVerticalSpeed);
+            float steeredY = Mathf.MoveToward(drone.Body.Velocity.Y, desiredVerticalVelocity, DroneAccelY * dt);
+            drone.Body.Velocity = new Vector3(steeredXZ.X, steeredY, steeredXZ.Y);
 
             drone.Body.MoveAndSlide();
+            if (authoritative)
+            {
+                Vector3 pos = drone.Body.GlobalPosition;
+                float movedSq = (pos - drone.LastPos).LengthSquared();
+                if (movedSq < 0.0001f && drone.Body.GetSlideCollisionCount() > 0)
+                {
+                    drone.NoProgressTicks++;
+                }
+                else
+                {
+                    drone.NoProgressTicks = 0;
+                }
+
+                if (drone.NoProgressTicks >= 8)
+                {
+                    drone.NextPathRecalcTick = tick + 1;
+                    drone.PathIndex = Mathf.Min(drone.PathIndex + 1, drone.Path.Count);
+                    drone.NoProgressTicks = 0;
+                }
+
+                drone.LastPos = pos;
+            }
 
             // If movement is blocked but target is still far, request an earlier path refresh.
             if (drone.Body.GetSlideCollisionCount() > 0 &&
@@ -637,20 +662,30 @@ public sealed class TagClassicMode : IGameMode
 
     private Vector3 ResolveDroneWaypoint(DroneAgent drone, PlayerCharacter targetCharacter, Vector3 fallbackTarget)
     {
-        if (drone.PathIndex < drone.Path.Count)
-        {
-            return drone.Path[drone.PathIndex];
-        }
-
         World3D? world = drone.Body.GetWorld3D();
         if (world is null)
         {
+            if (drone.PathIndex < drone.Path.Count)
+            {
+                return drone.Path[drone.PathIndex];
+            }
+
             return fallbackTarget;
         }
 
         if (!TryGetObstacleHit(world.DirectSpaceState, drone, targetCharacter, fallbackTarget, out Vector3 hitPos, out Vector3 hitNormal))
         {
+            if (drone.PathIndex < drone.Path.Count)
+            {
+                drone.PathIndex = drone.Path.Count;
+            }
+
             return fallbackTarget;
+        }
+
+        if (TryGetFurthestVisiblePathWaypoint(world.DirectSpaceState, drone, targetCharacter, out Vector3 visibleWaypoint))
+        {
+            return visibleWaypoint;
         }
 
         Vector3 tangent = hitNormal.Cross(Vector3.Up);
@@ -688,6 +723,41 @@ public sealed class TagClassicMode : IGameMode
         return leftCandidate.DistanceTo(fallbackTarget) <= rightCandidate.DistanceTo(fallbackTarget)
             ? leftCandidate
             : rightCandidate;
+    }
+
+    private bool TryGetFurthestVisiblePathWaypoint(
+        PhysicsDirectSpaceState3D space,
+        DroneAgent drone,
+        PlayerCharacter targetCharacter,
+        out Vector3 waypoint)
+    {
+        waypoint = Vector3.Zero;
+        if (drone.PathIndex >= drone.Path.Count)
+        {
+            return false;
+        }
+
+        int startIndex = Mathf.Clamp(drone.PathIndex, 0, drone.Path.Count - 1);
+        int maxIndex = Mathf.Min(drone.Path.Count - 1, startIndex + DroneWaypointLookAheadPoints);
+        int furthestVisibleIndex = -1;
+        for (int i = startIndex; i <= maxIndex; i++)
+        {
+            Vector3 candidate = drone.Path[i];
+            bool blocked = TryGetObstacleHit(space, drone, targetCharacter, candidate, out _, out _);
+            if (!blocked)
+            {
+                furthestVisibleIndex = i;
+            }
+        }
+
+        if (furthestVisibleIndex < 0)
+        {
+            return false;
+        }
+
+        drone.PathIndex = furthestVisibleIndex;
+        waypoint = drone.Path[furthestVisibleIndex];
+        return true;
     }
 
     private static bool HasDroneReachedTarget(DroneAgent drone, PlayerCharacter targetCharacter)
@@ -756,6 +826,8 @@ public sealed class TagClassicMode : IGameMode
         drone.NextPathRecalcTick = 0;
         drone.PendingRespawn = false;
         drone.RespawnAtTick = 0;
+        drone.LastPos = drone.Body.GlobalPosition;
+        drone.NoProgressTicks = 0;
     }
 
     private static void BeginDroneRespawnCooldown(DroneAgent drone, uint tick, int tickRate)
@@ -769,6 +841,8 @@ public sealed class TagClassicMode : IGameMode
         drone.PendingRespawn = true;
         uint delayTicks = (uint)Mathf.RoundToInt(DroneRespawnDelaySec * Mathf.Max(1, tickRate));
         drone.RespawnAtTick = tick + delayTicks;
+        drone.LastPos = drone.Body.GlobalPosition;
+        drone.NoProgressTicks = 0;
     }
 
     private static void TryCompleteDroneRespawn(DroneAgent drone, NetSession session, uint tick)
@@ -795,210 +869,32 @@ public sealed class TagClassicMode : IGameMode
 
         Vector3 start = drone.Body.GlobalPosition;
         Vector3 goal = targetCharacter.GlobalPosition + new Vector3(0.0f, DroneHoverHeightMeters, 0.0f);
-        TryFindPath(
-            world.DirectSpaceState,
-            session,
-            drone,
-            targetCharacter,
-            start,
-            goal,
-            desiredY,
-            drone.Path);
+        TryBuildNavPath(world, start, goal, drone.Path);
     }
 
-    private bool TryFindPath(
-        PhysicsDirectSpaceState3D space,
-        NetSession session,
-        DroneAgent drone,
-        PlayerCharacter targetCharacter,
-        in Vector3 start,
-        in Vector3 goal,
-        float desiredY,
-        List<Vector3> outPath)
+    private static bool TryBuildNavPath(World3D world, in Vector3 start, in Vector3 goal, List<Vector3> outPath)
     {
-        Vector2I startCell = WorldToCell(start);
-        Vector2I goalCell = WorldToCell(goal);
-
-        int minX = Mathf.Min(startCell.X, goalCell.X) - DronePathPaddingCells;
-        int maxX = Mathf.Max(startCell.X, goalCell.X) + DronePathPaddingCells;
-        int minY = Mathf.Min(startCell.Y, goalCell.Y) - DronePathPaddingCells;
-        int maxY = Mathf.Max(startCell.Y, goalCell.Y) + DronePathPaddingCells;
-
-        List<Vector2I> open = new() { startCell };
-        HashSet<Vector2I> closed = new();
-        Dictionary<Vector2I, Vector2I> cameFrom = new();
-        Dictionary<Vector2I, float> gScore = new() { [startCell] = 0.0f };
-        Dictionary<Vector2I, float> fScore = new() { [startCell] = Heuristic(startCell, goalCell) };
-
-        int expanded = 0;
-        while (open.Count > 0 && expanded < DronePathMaxExpandedNodes)
+        Rid navigationMap = world.NavigationMap;
+        if (!navigationMap.IsValid)
         {
-            expanded++;
-
-            int currentIndex = 0;
-            Vector2I current = open[0];
-            float bestF = fScore.TryGetValue(current, out float score) ? score : float.MaxValue;
-            for (int i = 1; i < open.Count; i++)
-            {
-                Vector2I candidate = open[i];
-                float candidateF = fScore.TryGetValue(candidate, out float candidateScore)
-                    ? candidateScore
-                    : float.MaxValue;
-                if (candidateF < bestF)
-                {
-                    bestF = candidateF;
-                    current = candidate;
-                    currentIndex = i;
-                }
-            }
-
-            if (current == goalCell)
-            {
-                BuildPath(cameFrom, current, desiredY, outPath);
-                outPath.Add(goal);
-                return true;
-            }
-
-            open.RemoveAt(currentIndex);
-            closed.Add(current);
-
-            foreach (Vector2I offset in DroneNeighborOffsets)
-            {
-                Vector2I neighbor = current + offset;
-                if (neighbor.X < minX || neighbor.X > maxX || neighbor.Y < minY || neighbor.Y > maxY)
-                {
-                    continue;
-                }
-
-                if (closed.Contains(neighbor))
-                {
-                    continue;
-                }
-
-                bool isGoal = neighbor == goalCell;
-                if (!isGoal && !IsPathCellWalkable(space, session, drone, targetCharacter, neighbor, desiredY))
-                {
-                    continue;
-                }
-
-                bool diagonal = offset.X != 0 && offset.Y != 0;
-                if (diagonal)
-                {
-                    Vector2I stepX = current + new Vector2I(offset.X, 0);
-                    Vector2I stepY = current + new Vector2I(0, offset.Y);
-                    bool stepXWalkable = stepX == goalCell || IsPathCellWalkable(space, session, drone, targetCharacter, stepX, desiredY);
-                    bool stepYWalkable = stepY == goalCell || IsPathCellWalkable(space, session, drone, targetCharacter, stepY, desiredY);
-                    if (!stepXWalkable || !stepYWalkable)
-                    {
-                        continue;
-                    }
-                }
-
-                float moveCost = diagonal ? 1.4142135f : 1.0f;
-                float currentG = gScore.TryGetValue(current, out float currentScore) ? currentScore : float.MaxValue;
-                float tentativeG = currentG + moveCost;
-                float neighborG = gScore.TryGetValue(neighbor, out float neighborScore) ? neighborScore : float.MaxValue;
-                if (tentativeG >= neighborG)
-                {
-                    continue;
-                }
-
-                cameFrom[neighbor] = current;
-                gScore[neighbor] = tentativeG;
-                fScore[neighbor] = tentativeG + Heuristic(neighbor, goalCell);
-                if (!open.Contains(neighbor))
-                {
-                    open.Add(neighbor);
-                }
-            }
+            outPath.Add(goal);
+            return false;
         }
 
-        outPath.Add(goal);
-        return false;
-    }
-
-    private bool IsPathCellWalkable(
-        PhysicsDirectSpaceState3D space,
-        NetSession session,
-        DroneAgent drone,
-        PlayerCharacter targetCharacter,
-        in Vector2I cell,
-        float desiredY)
-    {
-        SphereShape3D probeShape = new() { Radius = 0.33f };
-        PhysicsShapeQueryParameters3D query = new()
+        Vector3[] navPath = NavigationServer3D.MapGetPath(navigationMap, start, goal, optimize: true);
+        if (navPath.Length == 0)
         {
-            Shape = probeShape,
-            Transform = new Transform3D(Basis.Identity, CellToWorld(cell, desiredY)),
-            CollisionMask = 1,
-            CollideWithBodies = true,
-            CollideWithAreas = false,
-            Margin = 0.01f
-        };
-
-        Godot.Collections.Array<Rid> excludes = new();
-        excludes.Add(drone.Body.GetRid());
-        excludes.Add(targetCharacter.GetRid());
-        foreach (int peerId in session.GetKnownPeerIds())
-        {
-            if (session.TryGetAnyCharacter(peerId, out PlayerCharacter character))
-            {
-                excludes.Add(character.GetRid());
-            }
+            outPath.Add(goal);
+            return false;
         }
 
-        foreach (DroneAgent otherDrone in _dronesByRunner.Values)
+        outPath.AddRange(navPath);
+        if (outPath[^1].DistanceTo(goal) > 0.25f)
         {
-            if (!ReferenceEquals(otherDrone, drone))
-            {
-                excludes.Add(otherDrone.Body.GetRid());
-            }
+            outPath.Add(goal);
         }
 
-        query.Exclude = excludes;
-        Godot.Collections.Array<Godot.Collections.Dictionary> hits = space.IntersectShape(query, 1);
-        return hits.Count == 0;
-    }
-
-    private static void BuildPath(
-        Dictionary<Vector2I, Vector2I> cameFrom,
-        Vector2I current,
-        float desiredY,
-        List<Vector3> outPath)
-    {
-        List<Vector2I> reversed = new() { current };
-        while (cameFrom.TryGetValue(current, out Vector2I parent))
-        {
-            reversed.Add(parent);
-            current = parent;
-        }
-
-        for (int i = reversed.Count - 1; i >= 0; i--)
-        {
-            outPath.Add(CellToWorld(reversed[i], desiredY));
-        }
-    }
-
-    private static Vector2I WorldToCell(in Vector3 worldPos)
-    {
-        return new Vector2I(
-            Mathf.RoundToInt(worldPos.X / DroneGridCellMeters),
-            Mathf.RoundToInt(worldPos.Z / DroneGridCellMeters));
-    }
-
-    private static Vector3 CellToWorld(in Vector2I cell, float y)
-    {
-        return new Vector3(
-            cell.X * DroneGridCellMeters,
-            y,
-            cell.Y * DroneGridCellMeters);
-    }
-
-    private static float Heuristic(in Vector2I a, in Vector2I b)
-    {
-        int dx = Mathf.Abs(a.X - b.X);
-        int dy = Mathf.Abs(a.Y - b.Y);
-        return dx + dy;
+        return true;
     }
 
     private static Vector3 ComputeForward(float yaw, float pitch)

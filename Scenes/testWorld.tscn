@@ -3,6 +3,7 @@
 [ext_resource type="Texture2D" uid="uid://56pk5lhleyjr" path="res://addons/kenney_prototype_textures/orange/texture_01.png" id="1_pmequ"]
 [ext_resource type="Texture2D" uid="uid://t118kn6cpqs0" path="res://addons/kenney_prototype_textures/green/texture_01.png" id="3_d0hh2"]
 [ext_resource type="Script" uid="uid://bnqnrytf71jx6" path="res://Scripts/Items/PickupItem.cs" id="4_pickup"]
+[ext_resource type="Script" path="res://Scripts/World/TestWorldNavigationBootstrap.cs" id="5_nav_bootstrap"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_l54rq"]
 
@@ -41,7 +42,14 @@ emission_energy_multiplier = 0.4
 radius = 0.35
 height = 0.7
 
+[sub_resource type="NavigationMesh" id="NavigationMesh_nav"]
+agent_height = 2.0
+agent_radius = 0.35
+cell_height = 0.1
+cell_size = 0.2
+
 [node name="TestWorld" type="Node3D" unique_id=1869141061]
+script = ExtResource("5_nav_bootstrap")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=514382768]
 environment = SubResource("Environment_l54rq")
@@ -51,14 +59,17 @@ transform = Transform3D(-0.9612617, -0.13152277, -0.24223484, 0, -0.87881714, 0.
 light_color = Color(0.9372549, 1, 0.101960786, 1)
 shadow_enabled = true
 
-[node name="floor" type="CSGBox3D" parent="." unique_id=1053940192]
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
+navigation_mesh = SubResource("NavigationMesh_nav")
+
+[node name="floor" type="CSGBox3D" parent="NavigationRegion3D" unique_id=1053940192]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.887193, -0.52537155, 1.1890926)
 material_override = SubResource("StandardMaterial3D_pmequ")
 gi_mode = 2
 use_collision = true
 size = Vector3(100, 0.5, 100)
 
-[node name="CSGCombiner3D" type="CSGCombiner3D" parent="." unique_id=184534502]
+[node name="CSGCombiner3D" type="CSGCombiner3D" parent="NavigationRegion3D" unique_id=184534502]
 material_override = SubResource("StandardMaterial3D_l54rq")
 lod_bias = 0.001
 gi_mode = 2
